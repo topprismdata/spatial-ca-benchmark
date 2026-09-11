@@ -105,6 +105,21 @@ class TestBand(unittest.TestCase):
         b = ca_band(line, 8, 4)
         self.assertTrue(b["degenerate_geometry"])
 
+    def test_degenerate_diagonal_collinear(self):
+        # equirectangular float noise makes diagonal collinear area ~1e-5:
+        # must still be flagged (ratio guard, not area<=0)
+        diag = [(117.0 + i * 0.1, 39.0 + i * 0.1) for i in range(4)]
+        b = ca_band(clean_coordinates(diag, source_crs="WGS84"), 8, 4)
+        self.assertTrue(b["degenerate_geometry"])
+
+    def test_thin_valley_is_not_degenerate(self):
+        import random
+        rnd = random.Random(9)
+        valley = [(116.0 + (i / 199) * 0.5,
+                   39.0 + rnd.uniform(-0.002, 0.002)) for i in range(200)]
+        b = ca_band(clean_coordinates(valley, source_crs="WGS84"), 200, 20)
+        self.assertFalse(b["degenerate_geometry"])
+
     def test_classify_consistency(self):
         b = ca_band(cr(), 242, 21)
         mid = b["reference_mid_km"]

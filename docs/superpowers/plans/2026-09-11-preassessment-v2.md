@@ -416,9 +416,12 @@ def ca_band(clean: CleanResult, total_visits: int, available_workdays: int, *,
                          "into policy width"},
         "k_invariant_within_model": True,
         "crs_status": clean.crs_status,
-        "degenerate_geometry": area <= 0.0,  # <3 pts/collinear -> band=[0,0];
-        # report must map this to NOT_ASSESSED_DEGENERATE_GEOMETRY, never
-        # STRONGLY_INCONSISTENT_WITH_CA (quality review, V2.1)
+        # degenerate = zero or measure-zero hull; RATIO guard because
+        # equirectangular float noise gives diagonal-collinear sets a
+        # spurious area ~1e-5 km2 (verified: collinear ratio ~1e-8 vs a
+        # genuine 50km x 0.5km valley corridor ~0.9; 1e-4 keeps 4 orders
+        # of margin). report maps it to NOT_ASSESSED_DEGENERATE_GEOMETRY.
+        "degenerate_geometry": area <= 0.0 or area < 1e-4 * dx * dy,
         "small_sample_warning": thin,
         "including_confirmed_outlier": including_confirmed_outlier,
         "is_closed_tour": is_closed_tour,
