@@ -239,3 +239,4 @@ spatial-ca-benchmark/
 | v1 | 2026-09-11 | 初稿（G1-G5 全量、"理论区间/√K 差价/PoF 闭式"表述），用户批准 commit `34a31dc` |
 | v1.1 | 2026-09-11 | **外部评审否决 5 项过度确定结论**：① G1 抓不到整批 CRS 错配（定理级：刚性平移内部几何不变）；② 飞点未阻断 G2（凸包 ×10 复现）；③ "理论区间"命名过强 → `ca_reference_band`；④ 两对"BHH 开闭环常数"缺乏文献（主项同 β，开环差为低阶项）；⑤ √K 是强假设场景比值非可实现差价。另抓出：水填断言方向反、自等断言假测试、索引漂移、投影二次套娃、O(N²) 与复杂度声明矛盾、K 语义混乱、city 系数"标定"言过其实 |
 | v1.2 | 2026-09-11 | M0 返工：落 `docs/MEASUREMENT_CONTRACT.md`（C1-C10 + 常数考证 + 性能契约）；geometry 重写（CRS 声明必填、索引保持清洗、凸包双函数拆分）；`__init__` 惰性导出；状态回退"待验证"；0.1.0 范围收缩至 契约门+体检+参考带；走廊/需求加权/公平政策分别推至 0.2/0.3/0.4 |
+| v1.3 | 2026-09-11 | **二轮评审 6 阻断 + 4 修正 → 计划 V2.1**：K 测试方向修正（日带随 K 递减 + T=Kd 性质断言）；0.1.0 NN 回退精确暴力（可证明停止网格推 0.2）；带宽改显式版本化政策带 `heuristic_policy_envelope_v1`（废除平方和伪统计）；UNKNOWN CRS 全面阻断绝对 km（band=None，仅 structural_diagnostics）；PreAssessment 统一 dataclass 属性访问；report 状态机完整实现（gate 五态含 PASSED_WITH_INVALID_ROWS_DROPPED）；BETA 拆 point_estimate/published_bounds/operational_inputs 三字段；性能门槛基线相对化改名 synthetic throughput |

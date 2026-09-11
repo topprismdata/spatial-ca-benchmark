@@ -2,7 +2,7 @@
 single-rep visit planning. Evidence before trust.
 
 Facade uses PEP 562 lazy exports so the package imports cleanly while
-submodules land milestone by milestone (0.1.0 = contract + sanity + band).
+submodules land milestone by milestone (0.1.0 = contract + gate + band).
 """
 
 from __future__ import annotations
@@ -24,15 +24,17 @@ _EXPORTS = {
     # terrain (0.1.0)
     "CIRCUITY_PRESETS": "spatial_ca.terrain",
     "get_city_terrain_and_circuity": "spatial_ca.terrain",
-    # sanity (0.1.0)
+    # sanity gate (0.1.0)
     "find_suspects": "spatial_ca.sanity",
+    "adjudicate": "spatial_ca.sanity",
     # band (0.1.0)
-    "SpatialBenchmark": "spatial_ca.band",
-    "estimate_ca_band": "spatial_ca.band",
-    # report/cli (0.1.0)
+    "BETA": "spatial_ca.band",
+    "ca_band": "spatial_ca.band",
+    "classify": "spatial_ca.band",
+    # report (0.1.0)
     "preassess": "spatial_ca.report",
     "PreAssessment": "spatial_ca.report",
-    # deferred (roadmap)
+    # deferred roadmap (0.2/0.3/0.4) - ImportError carries roadmap guidance
     "reference_corridors": "spatial_ca.corridor",
     "diagnose_plan": "spatial_ca.corridor",
     "dispersion_scenario_contrast": "spatial_ca.corridor",
@@ -48,7 +50,7 @@ def __getattr__(name: str) -> Any:  # PEP 562
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     try:
         mod = importlib.import_module(target)
-    except ImportError as exc:  # module not yet shipped in this milestone
+    except ImportError as exc:  # not shipped in this milestone
         raise ImportError(
             f"{name} lives in {target!r}, which is not available yet "
             f"(deferred by the 0.1.0 scope cut).") from exc

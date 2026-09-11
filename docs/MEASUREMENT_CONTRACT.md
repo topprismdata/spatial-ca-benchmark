@@ -57,15 +57,15 @@
 
 ## C8 质量门（Gate）：G1 不过，G2 必须 fail-closed
 
-| G1 结果 | G2 行为 |
+| G1 结果 | gate / G2 行为 |
 |---|---|
-| 非法点（null/nan/bbox 外） | 排除 + lineage 记录，继续 |
-| `far_outlier` **未经用户裁决** | **`BLOCKED_BY_DATA_QUALITY`**，不产出参考带 |
-| 用户确认排除（`confirm_drop=[...]`） | 干净集计算，报告保留被剔点与影响量 |
-| 用户确认保留（`confirm_keep=[...]`） | 计算 + 标记 `INCLUDING_CONFIRMED_OUTLIER` |
-| `source_crs=UNKNOWN` | 参考带绝对量级降级为"结构分析"，标记 `CRS_UNCONFIRMED` |
+| 非法点（null/nan/bbox 外） | 排除 + lineage 记录；若曾发生则 gate=`PASSED_WITH_INVALID_ROWS_DROPPED`（不得静默显示 PASSED） |
+| `far_outlier` **未经用户裁决** | gate=`BLOCKED_BY_DATA_QUALITY`，`band=None`，`status=NOT_ASSESSED_DATA_QUALITY_BLOCKED` |
+| 用户确认排除（`confirm_drop=[...]`） | 干净集计算；lineage 保留 `dropped_by_user` 与影响量 |
+| 用户确认保留（`confirm_keep=[...]`） | 计算 + gate=`INCLUDING_CONFIRMED_OUTLIER`，band 内 `including_confirmed_outlier=True` |
+| `source_crs=UNKNOWN` | gate=`STRUCTURE_ONLY`；**绝对 km 全阻断**：`band=None`、`status=NOT_ASSESSED_CRS_UNCONFIRMED`；几何结果只进 `structural_diagnostics`（frame-relative），不得命名为 band |
 
-禁止静默剔除，禁止发现飞点后照常输出。
+禁止静默剔除，禁止发现飞点后照常输出，禁止在未确认 CRS 下给出任何 km 数值结论（非技术用户会忽略 note 直接看数字——fail closed 是唯一防线）。
 
 ## C9 状态 → 允许的业务结论（白名单）
 

@@ -1,11 +1,12 @@
 """Geometry primitives: CRS declaration, index-preserving cleaning, hulls.
 
-Design contracts (MEASUREMENT_CONTRACT.md items 1, 2, 6; review M0 items):
+Design contracts (MEASUREMENT_CONTRACT.md items C1, C2, C6):
 - The caller MUST declare ``source_crs``; the framework never guesses a CRS
   label and can NEVER detect a whole-batch GCJ/WGS mislabel from internal
-  geometry alone (rigid shifts leave pairwise structure invariant).
+  geometry alone (rigid shifts leave pairwise structure invariant - a
+  theorem, not a limitation to be engineered away).
 - Cleaning is index-preserving: every kept point carries its original row
-  index so business plans (store_id / row references) never silently drift.
+  index so business plans (store_id / row references) never drift silently.
 - Hull helpers are split by coordinate semantics: ``hull_area_xy`` takes
   projected km points, ``hull_area_lonlat_km2`` takes WGS-84 degrees.
   No function guesses which one it received.
@@ -26,7 +27,7 @@ XY = Point  # projected kilometres, local frame
 CN_BBOX = (73.0, 3.0, 136.0, 54.0)        # mainland China (lng, lat)
 GLOBAL_BBOX = (-180.0, -90.0, 180.0, 90.0)
 
-# CRS identifiers (contract item 1)
+# CRS identifiers (contract C1)
 WGS84 = "WGS84"
 GCJ02 = "GCJ02"
 BD09 = "BD09"
@@ -55,7 +56,8 @@ _XPI = math.pi * 3000.0 / 180.0
 
 
 def _out_of_china(lng: float, lat: float) -> bool:
-    return not (CN_BBOX[0] <= lng <= CN_BBOX[2] and CN_BBOX[1] <= lat <= CN_BBOX[3])
+    return not (CN_BBOX[0] <= lng <= CN_BBOX[2]
+                and CN_BBOX[1] <= lat <= CN_BBOX[3])
 
 
 def _transform_lat(lng: float, lat: float) -> float:
@@ -115,9 +117,13 @@ def bd09_to_wgs84(lng: float, lat: float) -> Point:
 # ---------------------------------------------------------------------------
 @dataclass
 class CleanResult:
-    """Kept points in WGS-84 (or raw when CRS unknown) + full lineage."""
+    """Kept points + full lineage. Never renumbers silently.
+
+    ``points`` are the effective frame: WGS-84 when the source CRS was
+    declared (and thus converted), raw input when CRS_UNCONFIRMED.
+    """
     points: List[Point]
-    kept_indices: List[int]                     # original row index of each kept pt
+    kept_indices: List[int]                 # original row index of each kept pt
     dropped: List[Dict] = field(default_factory=list)
     source_crs: str = UNKNOWN
     crs_status: str = CRS_UNCONFIRMED
@@ -132,13 +138,11 @@ def clean_coordinates(coords: Sequence[Point], *,
                       source_crs: str = UNKNOWN,
                       bbox: Tuple[float, float, float, float] = CN_BBOX,
                       ) -> CleanResult:
-    """Validate + (optionally) datum-transform, never losing indices.
+    """Validate + (only when declared) datum-transform, never losing indices.
 
-    - ``source_crs`` must be one of WGS84/GCJ02/BD09/UNKNOWN.
-    - UNKNOWN: NO conversion is performed and the result is tagged
-      ``CRS_UNCONFIRMED``; downstream reference bands must downgrade their
-      conclusions and the caller owns the label risk (contract item 1).
-    - Raises ValueError only when nothing survives validation.
+    UNKNOWN performs NO conversion and tags CRS_UNCONFIRMED: absolute km
+    conclusions must be blocked downstream (contract C1.3).
+    Raises ValueError only when nothing survives validation.
     """
     if source_crs not in VALID_CRS:
         raise ValueError(f"source_crs must be one of {VALID_CRS}")
@@ -167,11 +171,12 @@ def clean_coordinates(coords: Sequence[Point], *,
             else:
                 if math.isnan(lng) or math.isnan(lat):
                     bad = "nan"
-                elif not (bbox[0] <= lng <= bbox[2] and bbox[1] <= lat <= bbox[3]):
+                elif _out_of_china(lng, lat):
+                    # datum-agnostic sanity window: applies pre-conversion to
+                    # GCJ02/BD09 inputs too (offsets are ~km, not degrees)
                     bad = "outside_bbox"
         if bad is not None:
-            dropped.append({"index": i, "reason": bad,
-                            "lng": lng, "lat": lat})
+            dropped.append({"index": i, "reason": bad, "lng": lng, "lat": lat})
             continue
         if status == CONVERTED_FROM_GCJ02:
             lng, lat = gcj02_to_wgs84(lng, lat)
@@ -187,9 +192,9 @@ def clean_coordinates(coords: Sequence[Point], *,
 
 
 # ---------------------------------------------------------------------------
-# hulls: two functions, two coordinate semantics
+# hulls: two entry points, two coordinate semantics
 # ---------------------------------------------------------------------------
-def _hull_from_xy(pts_km: Sequence[XY]) -> float:
+def _hull_area_from_xy(pts_km: Sequence[XY]) -> float:
     pts = sorted({(round(p[0], 6), round(p[1], 6)) for p in pts_km})
     if len(pts) < 3:
         return 0.0
@@ -214,22 +219,12 @@ def _hull_from_xy(pts_km: Sequence[XY]) -> float:
         for i in range(len(hull))))
 
 
-def hull_area_xy(pts_km: Sequence[XY]) -> Tuple[float, float, float]:
-    """Area/dx/dy in km for ALREADY-PROJECTED points. No re-projection."""
-    if not pts_km:
-        return 0.0, 0.0, 0.0
-    xs = [p[0] for p in pts_km]
-    ys = [p[1] for p in pts_km]
-    return _hull_from_xy(pts_km), max(xs) - min(xs), max(ys) - min(ys)
-
-
 def project_km(coords_wgs84: Sequence[Point]) -> Tuple[List[XY], float, float,
                                                        float, float]:
-    """Local equirectangular frame around the point set's min corner.
+    """Local equirectangular frame around the set's min corner.
 
-    Returns (xy_km, min_lng, min_lat, kx, ky). The frame (origin + km/deg
-    scales) MUST be carried alongside the projected points; feeding xy back
-    into lonlat APIs is forbidden by contract.
+    Returns (xy_km, min_lng, min_lat, kx, ky). Carry the frame alongside
+    projected points; feeding xy back into lonlat APIs is forbidden (C2.2).
     """
     lngs = [p[0] for p in coords_wgs84]
     lats = [p[1] for p in coords_wgs84]
@@ -240,8 +235,18 @@ def project_km(coords_wgs84: Sequence[Point]) -> Tuple[List[XY], float, float,
     return xy, min_lng, min_lat, kx, ky
 
 
+def hull_area_xy(pts_km: Sequence[XY]) -> Tuple[float, float, float]:
+    """(area, dx, dy) in km for ALREADY-PROJECTED points. No re-projection."""
+    if not pts_km:
+        return 0.0, 0.0, 0.0
+    xs = [p[0] for p in pts_km]
+    ys = [p[1] for p in pts_km]
+    return (_hull_area_from_xy(pts_km),
+            max(xs) - min(xs), max(ys) - min(ys))
+
+
 def hull_area_lonlat_km2(coords_wgs84: Sequence[Point]) -> Tuple[float, float, float]:
-    """Area/dx/dy in km from WGS-84 degree points (projects internally)."""
+    """(area, dx, dy) in km from WGS-84 degree points (projects internally)."""
     if not coords_wgs84:
         return 0.0, 0.0, 0.0
     xy, _, _, _, _ = project_km(coords_wgs84)
