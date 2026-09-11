@@ -84,6 +84,31 @@ class TestPreassess(unittest.TestCase):
                         measured_scope="with_stem_round_trip")
         self.assertIn("scope_caveat", rep.assessment)
 
+    def test_dense_regime_refused(self):
+        # Guangzhou-style: weekly revisits (f=V/N > 2.5) -> refusal, no band
+        import random
+        rnd = random.Random(42)
+        pts = [(113.2 + rnd.random() * 0.07, 23.04 + rnd.random() * 0.05)
+               for _ in range(160)]
+        rep = preassess(pts, total_visits=160 * 4, available_workdays=23,
+                        source_crs="WGS84", city="广州市")   # no measured_km:
+        # refusal must be independent of it - the band itself is invalid
+        self.assertEqual(rep.gate, "REFUSED_PASSED")
+        self.assertIsNone(rep.band)
+        self.assertEqual(rep.assessment["status"],
+                         "NOT_ASSESSED_DENSE_VISIT_REGIME")
+        self.assertEqual(rep.assessment["visits_per_store"], 4.0)
+
+    def test_sparse_regime_still_assessed(self):
+        import random
+        rnd = random.Random(7)
+        pts = [(115.9 + rnd.random() * 0.3, 39.55 + rnd.random() * 0.2)
+               for _ in range(200)]
+        rep = preassess(pts, total_visits=242, available_workdays=21,
+                        source_crs="WGS84")
+        self.assertIsNotNone(rep.band)
+        self.assertEqual(rep.band["regime"], "sparse_partitioned")
+
     def test_k_semantics_exposed(self):
         rep = preassess(cloud(), total_visits=242, available_workdays=21,
                         source_crs="WGS84")

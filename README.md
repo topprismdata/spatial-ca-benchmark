@@ -17,7 +17,8 @@
 3. **0.1.0 没有的东西**：走廊诊断（`reference_corridors`）、公平政策代价（`cost_of_selected_equity_policy`）、需求加权（`VisitDemand`）。当前密度假设为 `ASSUMED_UNIFORM_VISIT_DENSITY`（均匀拜访密度），该假设随每份输出出现在 `band.assumptions` 中；加权模式落地前，不对"高频店集中城区"类场景做任何定量承诺。
 4. **飞点检测是精确暴力 O(N²) 最近邻（`bruteforce_v1`）。** 适用域 = **单销售 ≤ 2,000 店**（典型 100–500 店亚秒级）。更大规模请等 0.2 的可证明停止网格版（将附与本实现的等价性测试）。本版**不做任何绝对规模性能承诺**——性能数据全部是 *synthetic throughput benchmark*（合成吞吐 ≠ 真实数据最坏分布），门槛为相对基线制。
 5. **它不是优化器。** 不排路线、不分组、不排班，不承诺任何可兑现的节省额。高里程只输出诊断提示"可能由坐标错误、CRS 错配、跨区排班、仓库往返或业务约束造成，需进一步核查"——禁止凭 CA 把高里程归因为"排班分组差"。
-6. **小日样本不可靠。** 参考带基于 √(V·A) 渐近律，在日粒度拜访数 n < 10 处有系统性偏差（2021 年综述结论）；此时输出 `small_sample_warning = True` 并加宽政策带，但可靠性下降本身只能标注、无法修复。
+6. **单凸包带只适用稀疏分区 regime（V2.2 起强制声明）。** 每店周期拜访 ≤2.5 次时，日集合空间近似互斥，`T = β·c·√(V·A)` 成立；周访合同（f>2.5）下月度计划重扫少数星期几片区，该公式系统性低估 ~2-3 倍——框架**拒答**（`REFUSED_*`，band=None）而不是调宽带宽吞掉结构性错误。此限制由广州十线留出实验发现（见 §2 故事三），输出字段 `band.regime` 与 `assumptions=["regime:..."]` 自文档化。
+7. **小日样本不可靠。** 参考带基于 √(V·A) 渐近律，在日粒度拜访数 n < 10 处有系统性偏差（2021 年综述结论）；此时输出 `small_sample_warning = True` 并加宽政策带，但可靠性下降本身只能标注、无法修复。
 
 ## 2. 事故故事（只讲可兑现的部分）
 
@@ -26,6 +27,8 @@
 **房山：1834 km 的月度计划。** 某区域月度拜访计划上报实测总里程 1834 km。清洗 201 个门店点、扫描飞点、建带、分类——整个流程亚秒级完成，得到 `STRONGLY_INCONSISTENT_WITH_CA`：1834 km 对着 **[243.79, 422.57] km** 的参考带（中位 325.05 km）根本放不进"口径差异"的解释框架。参考带没有说错在哪里，只说了"高度疑似数据缺陷或口径错配，先查证据"——后来查实是输入缺陷。这正是它该有的作用：**证伪只要几秒，解释要靠证据。**
 
 **天津：藏在数据里的 (110, 110)。** 一个真实数据集混入一行 `(110.0, 110.0)`——经纬度字段填反/填错产生的越界非法点。G1 不会静默吞掉它：剔除会记录在 `lineage.dropped_invalid = [201]`，并且 gate 升格为 `PASSED_WITH_INVALID_ROWS_DROPPED`——报告明示"发生过剔除"，永远不会顶着 `PASSED` 的脸面装干净。未裁决的飞点更严格：整份报告 `gate = BLOCKED_BY_DATA_QUALITY`、`band = None`，一条 km 数值都不会给。
+
+**广州：留出集证伪了框架自己（故事三）。** 发布前用真实留出数据（海珠荔湾 10 条线，周访合同 f=4.2–4.6，实测 OSM 里程做参照）检验参考带：**0/10 命中，实测全部比带高 2–3 倍**。根因是"月总量与 K 无关"公理隐含日集合空间互斥假设，只在稀疏回访下成立——房山（V≈K²）恰好满足，通过了全部标定；广州密集重扫直接拆穿。修复方式是拒答而非辩解：`regime` 守护 + `REFUSED_*`，密集 regime 留给 0.2 的片区分解。这个故事的要点：**留出验证第一次开火的对象应该是框架自己。**
 
 ## 3. 快速上手
 
@@ -111,6 +114,7 @@ print(cleaned.lineage["dropped_by_user"])  # [201] —— 裁决进 lineage
 | `INCLUDING_CONFIRMED_OUTLIER` | 有（`including_confirmed_outlier=True`） | 用户 `confirm_keep` 保留飞点 |
 | `BLOCKED_BY_DATA_QUALITY` | **None** | 存在未裁决飞点（`assessment.unresolved_suspects` 列出索引） |
 | `STRUCTURE_ONLY` | **None** | `source_crs = UNKNOWN`；几何只进 `structural_diagnostics`（框架相对量） |
+| `REFUSED_<原gate>` | **None** | 密集回访 regime（每店周期拜访 >2.5 次）：单凸包带结构性失效，拒答而非报错数（见 §2 广州留出） |
 
 ### 4.2 状态 → 允许的业务结论（白名单照抄 C9）
 
@@ -124,6 +128,7 @@ print(cleaned.lineage["dropped_by_user"])  # [201] —— 裁决进 lineage
 | `NOT_ASSESSED_DATA_QUALITY_BLOCKED` | 未评估；先裁决飞点 | 任何 km 级结论 |
 | `NOT_ASSESSED_CRS_UNCONFIRMED` | 未评估；先声明 `source_crs` | 任何绝对 km 结论 |
 | `NOT_ASSESSED_DEGENERATE_GEOMETRY` | 未评估；共线/点数不足，无 2D 服务域可比 | 任何带级结论 |
+| `NOT_ASSESSED_DENSE_VISIT_REGIME` | 未评估；周访合同下月度重扫片区，须待 0.2 片区分解 | 用全局带评周访线路（实测低估 ~2-3 倍） |
 
 分类阶梯（实测 m 对带 [lo, hi]，系数为经验阈值、`v1` 版本、待留出集标定）：`m < 0.90·lo` → BELOW；`m ≤ hi` → CONSISTENT；`m ≤ 1.50·hi` → ABOVE；否则 STRONGLY。
 

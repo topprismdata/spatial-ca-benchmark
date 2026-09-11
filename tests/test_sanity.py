@@ -40,6 +40,28 @@ class TestSuspects(unittest.TestCase):
         # 暴力 NN 的真值锚: far->c, 局部均值纬度系 ~139.3 km;
         # ±2格/部分搜索的网格法给不出这个精度 —— 这正是 0.1.0 用暴力的原因
 
+    def test_dense_urban_no_false_flyouts(self):
+        # Guangzhou-style ultra-dense cloud: median NN ~50 m; a store 400 m
+        # from its nearest neighbour is legitimate, NOT a fly-out (abs floor)
+        import random
+        rnd = random.Random(11)
+        pts = [(113.30 + rnd.random() * 0.06, 23.06 + rnd.random() * 0.05)
+               for _ in range(300)]
+        pts.append((113.30, 23.06 + 0.004))          # ~440 m off-cluster
+        cr = clean_coordinates(pts, source_crs="WGS84")
+        self.assertEqual(find_suspects(cr), [])
+
+    def test_flyout_above_abs_floor_still_flagged(self):
+        # same dense cloud, but a 12 km fly-out: real hull risk, must flag
+        import random
+        rnd = random.Random(11)
+        pts = [(113.30 + rnd.random() * 0.06, 23.06 + rnd.random() * 0.05)
+               for _ in range(300)]
+        pts.append((113.30 + 0.28, 23.06))           # NN ~24 km > floor
+        cr = clean_coordinates(pts, source_crs="WGS84")
+        s = find_suspects(cr)
+        self.assertEqual([x["original_index"] for x in s], [300])
+
     def test_invalid_points_are_dropped_not_suspects(self):
         cr = clean_coordinates(cloud() + [(110.0, 110.0)], source_crs="WGS84")
         self.assertEqual([d["reason"] for d in cr.dropped], ["outside_bbox"])

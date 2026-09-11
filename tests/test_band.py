@@ -120,6 +120,16 @@ class TestBand(unittest.TestCase):
         b = ca_band(clean_coordinates(valley, source_crs="WGS84"), 200, 20)
         self.assertFalse(b["degenerate_geometry"])
 
+    def test_regime_fields(self):
+        # sparse: V/N = 242/201 = 1.2 -> sparse_partitioned
+        b = ca_band(cr(), 242, 21)
+        self.assertEqual(b["regime"], "sparse_partitioned")
+        # dense: V/N = 800/201 = 3.98 -> dense_revisit (band value itself is
+        # known-wrong there; report layer refuses it, band only labels it)
+        b2 = ca_band(cr(), 800, 21)
+        self.assertEqual(b2["regime"], "dense_revisit")
+        self.assertAlmostEqual(b2["visits_per_store"], 3.98, places=2)
+
     def test_classify_consistency(self):
         b = ca_band(cr(), 242, 21)
         mid = b["reference_mid_km"]

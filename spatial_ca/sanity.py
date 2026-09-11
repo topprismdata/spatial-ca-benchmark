@@ -18,8 +18,13 @@ from spatial_ca.geometry import CleanResult, project_km
 
 
 def find_suspects(clean: CleanResult, *, nn_factor: float = 8.0,
-                  min_kept: int = 8) -> List[Dict]:
-    """Flag kept points whose EXACT NN distance >= nn_factor x median NN."""
+                  min_kept: int = 8, abs_floor_km: float = 10.0) -> List[Dict]:
+    """Flag points far from ALL neighbours: NN >= max(nn_factor x median NN,
+    abs_floor_km). The absolute floor matters in ultra-dense urban clouds
+    (Guangzhou: median NN ~40 m makes a legitimate 380 m neighbour look 9x
+    outlying); a fly-out must be geographically FAR, km-scale - only such
+    points can explode a hull (Tianjin 110/110; Guangzhou holdout false
+    positives, 2026-09-11)."""
     pts = clean.points
     n = len(pts)
     if n < max(min_kept, 4):
@@ -30,11 +35,12 @@ def find_suspects(clean: CleanResult, *, nn_factor: float = 8.0,
     med = sorted(nn)[n // 2]
     if med <= 1e-6:
         return []
+    thresh = max(nn_factor * med, abs_floor_km)
     return [{"original_index": clean.kept_indices[pos],
              "clean_position": pos, "reason": "far_outlier",
              "nn_km": round(nn[pos], 2),
              "lng": pts[pos][0], "lat": pts[pos][1]}
-            for pos in range(n) if nn[pos] > nn_factor * med]
+            for pos in range(n) if nn[pos] > thresh]
 
 
 def adjudicate(clean: CleanResult, suspects: Sequence[Dict], *,

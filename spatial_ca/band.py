@@ -74,6 +74,16 @@ def ca_band(clean: CleanResult, total_visits: int, available_workdays: int, *,
         hi_mult += THIN_WIDEN_HI
     if is_closed_tour:
         hi_mult += CLOSED_HI_EXTRA
+    # Regime guard (GUANGZHOU HOLDOUT, 2026-09-11): T = BETA*c*sqrt(V*A)
+    # assumes spatially disjoint daily sets (sparse-revisit: each store met
+    # <= ~2x per period). With dense revisits (weekly contracts, f=V/N>=3)
+    # only D distinct weekday districts exist and each is re-swept K/D times:
+    # truth ~ BETA*c*sqrt(V*A*K/D); the global-hull formula underestimates
+    # by ~2-3x (measured -50%..-70% on Guangzhou lines 02-11). 0.1.0
+    # REFUSES dense regime instead of widening bands with a fudge factor;
+    # district decomposition (roadmap 0.2) will predict it properly.
+    f_revisit = total_visits / max(1, len(clean.points))
+    regime = "dense_revisit" if f_revisit > 2.5 else "sparse_partitioned"
     mid = BETA * circ["value"] * math.sqrt(max(0.0, total_visits * area))
     lo, hi = mid * lo_mult, mid * hi_mult
     return {
@@ -97,6 +107,8 @@ def ca_band(clean: CleanResult, total_visits: int, available_workdays: int, *,
                          "TSP); open/closed delta is lower-order, folded "
                          "into policy width"},
         "k_invariant_within_model": True,
+        "regime": regime,
+        "visits_per_store": round(f_revisit, 2),
         "crs_status": clean.crs_status,
         # degenerate = zero or measure-zero hull. RATIO guard (not area<=0)
         # because equirectangular float noise gives diagonal-collinear sets
@@ -107,7 +119,7 @@ def ca_band(clean: CleanResult, total_visits: int, available_workdays: int, *,
         "small_sample_warning": thin,
         "including_confirmed_outlier": including_confirmed_outlier,
         "is_closed_tour": is_closed_tour,
-        "assumptions": ["corridor_regime", "ASSUMED_UNIFORM_VISIT_DENSITY",
+        "assumptions": [f"regime:{regime}", "ASSUMED_UNIFORM_VISIT_DENSITY",
                         "inter_stop_distance_only",
                         "K_from:available_workdays"],
     }

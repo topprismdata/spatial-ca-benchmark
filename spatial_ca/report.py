@@ -140,12 +140,33 @@ def preassess(coords: Sequence[Point], *, total_visits: int,
                    is_closed_tour=is_closed_tour,
                    including_confirmed_outlier=bool(kept))
 
+    # Dense-revisit refusal is INDEPENDENT of measured_km: the band itself
+    # is structurally wrong here (Guangzhou holdout: 0/10 in-band, f=4.2-4.6,
+    # underestimation ~2-3x), so it must never leak into the report at all.
+    if band["regime"] == "dense_revisit":
+        assessment = {"status": "NOT_ASSESSED_DENSE_VISIT_REGIME",
+                      "visits_per_store": band["visits_per_store"],
+                      "note": "stores revisited >2.5x per period: the month "
+                              "re-sweeps districts; single-hull CA would "
+                              "underestimate ~2-3x (Guangzhou holdout). "
+                              "Awaiting district decomposition (0.2)."}
+        return PreAssessment(gate="REFUSED_" + gate, lineage=lineage, k=k,
+                             band=None,
+                             structural=_structural(effective, suspects,
+                                                    frame_relative=False),
+                             assessment=assessment,
+                             meta={"band_method": None,
+                                   "envelope_version": None,
+                                   "crs_status": clean.crs_status,
+                                   "city": city,
+                                   "circuity": band["circuity"]})
+
     if measured_km is None:
         assessment: Dict = {"status": "REFERENCE_ONLY"}
     elif band["degenerate_geometry"]:
         assessment = {"status": "NOT_ASSESSED_DEGENERATE_GEOMETRY",
-                            "note": "collinear/insufficient points: no "
-                                    "2D service area to benchmark"}
+                      "note": "collinear/insufficient points: no "
+                              "2D service area to benchmark"}
     else:
         assessment = {"status": classify(measured_km, band),
                       "measured_total_km": round(measured_km, 2),
@@ -163,8 +184,9 @@ def preassess(coords: Sequence[Point], *, total_visits: int,
                          structural=_structural(effective, suspects,
                                                 frame_relative=False),
                          assessment=assessment,
-                         meta={"band_method": band["band_method"],
-                               "envelope_version": band["envelope_version"],
+                         meta={"band_method": (band or {}).get("band_method"),
+                               "envelope_version": (band or {})
+                               .get("envelope_version"),
                                "crs_status": clean.crs_status,
                                "city": city,
-                               "circuity": band["circuity"]})
+                               "circuity": (band or {}).get("circuity")})

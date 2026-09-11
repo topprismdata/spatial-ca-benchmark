@@ -52,6 +52,8 @@
 | **模型推断** | CA 参考带本身；√K 型情景对照；Pareto 端点结构 | "在均匀密度+分区假设下""理想化对照" |
 | **经验阈值** | circuity 1.22/1.27/1.29/1.35（city_prior，置信度 LOW）；状态阶梯 0.85/1.05/1.35；形状修正斜率 0.08 与帽 1.15 | "先验""待留出集标定" |
 
+**适用域守护（V2.2，广州留出 2026-09-11 新增）**：全局单凸包带仅在**稀疏分区 regime**（每店周期拜访 ≤2.5 次，日集合空间互斥）有效。密集回访 regime（周访合同、f=V/N>2.5）下月度计划重扫星期几片区，单凸包公式系统性低估 ~2-3 倍——框架**拒答**（`NOT_ASSESSED_DENSE_VISIT_REGIME`，band=None），禁止用调宽带宽的方式吞掉结构性错误。片区分解（district decomposition）是该 regime 的正解，归 roadmap 0.2。
+
 **统一改名（强制）**：`theoretical_interval → ca_reference_band`；"理论上下界"→"参考带下沿/上沿"；状态四件套 `BELOW_CA_REFERENCE / CONSISTENT_WITH_CA_REFERENCE / ABOVE_CA_REFERENCE / STRONGLY_INCONSISTENT_WITH_CA`；`sqrt_k_premium → dispersion_scenario_contrast`（比值字段 `idealized_upper_contrast_ratio`，必须随附全部前提假设）；PoF 输出名 `cost_of_selected_equity_policy`。
 诊断措辞禁令：不得仅凭 CA 把高里程归因为"排班分组差"，只允许写"可能由坐标错误、CRS 错配、跨区排班、仓库往返或业务约束造成，需进一步核查"。
 
@@ -79,6 +81,7 @@
 
 - 参考带宽度成分：单一主常数 β（见附录）× 迂回系数不确定性（city_prior 层级 ±）× 模型失配乘子（经验值，公开标注为经验阈值，不冒称统计置信区间）。
 - 迂回系数溯源结构（强制字段）：`{circuity, source: rep_history|city_observed|city_prior|national_default, calibration_version, sample_size, confidence}`；优先级按上列顺序。
+- **留出执行记录（2026-09-11）**：广州 02–11 十线（f=4.2–4.6）对 v2.1 参考带 0/10 命中 → 证伪"K 不变"公理（其仅对稀疏 regime 成立，房山 V≈K² 巧合通过了标定）→ v2.2 regime 守护 + 拒答。飞点检测同步引入 10 km 绝对地板（广州密集云 40 m 中位 NN 下，380 m 合法邻居曾被 8× 相对判据误杀 4 店）。框架第一次实战检验的对象是它自己——结论：拒答错 regime 优于自信报错数。
 - 留出协议：真实金样例（房山、广州 02–11 实测 OSM 矩阵对账）**不进公开仓库**；公开仓使用同构合成集 + `data_signature.json`（输入聚合统计指纹：点数/面积/跨度/实测带内判定），真实数据仅在私有环境按同一版本参数复跑，要求 4/4 状态判定一致。
 - 任何标定变更必须 bump `calibration_version` 并在 CHANGELOG 留痕。
 
