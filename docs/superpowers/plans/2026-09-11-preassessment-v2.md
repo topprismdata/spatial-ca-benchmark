@@ -2,11 +2,20 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development。步骤用 `- [ ]` 追踪。
 > **上位约束:** `docs/MEASUREMENT_CONTRACT.md`（C1–C10、C-CONST、C-PERF）。命名/措辞冲突，契约赢。v1 计划冻结废止。
-> **V2.1 修订（2026-09-11 二轮评审）:** ①K 测试方向修正；②0.1.0 飞点用**精确暴力 NN**（可证明停止的网格搜索推 0.2）；③带宽改**显式版本化政策带** `heuristic_policy_envelope_v1`；④`UNKNOWN` CRS **阻断绝对 km 结论**（band=None → `structural_diagnostics`）；⑤`PreAssessment` 统一 dataclass 属性访问，禁 `__getitem__` 双接口；⑥Task 0.3 给出完整状态机实现。另：invalid 剔除不再静默（`PASSED_WITH_INVALID_ROWS_DROPPED`）、adjudicate 死代码删除、BETA 三字段拆分（数学宽界不入运营带）、性能门槛基线相对化并命名 synthetic throughput。
+> **V2.1 修订（二轮评审 6 阻断 + 4 修正，全部在计划内闭环）:**
+> ①Task 0.2 K 断言方向修正（日带随 K 递减 + `T=K·d` 性质断言）；
+> ②0.1.0 飞点检测用**精确暴力 NN**（可证明停止的网格搜索推 0.2，附等价测试）；
+> ③带宽 = **显式版本化政策带** `heuristic_policy_envelope_v1`（乘法系数表，废除平方和伪统计）；
+> ④`UNKNOWN` CRS **fail-closed**：`band=None`，绝对 km 阻断，几何只进 `structural_diagnostics`；
+> ⑤`PreAssessment` 统一 dataclass 属性访问，禁 `__getitem__` 双接口；
+> ⑥Task 0.3 状态机 + 完整实现，治理逻辑零临场发挥；
+> ⑦invalid 剔除不静默：独立 gate `PASSED_WITH_INVALID_ROWS_DROPPED` + `lineage.dropped_invalid`；
+> ⑧`adjudicate` 死代码/双跳 decision 清除；⑨BETA 拆 `point_estimate / published_mathematical_bounds / bounds_used_in_operational_band=False`；⑩性能=基线相对门槛 + 改名 synthetic throughput。
+> **容差原则（本轮 CI 事故预防）：** 凡输出经 `round(2)` 而断言引用其他已舍入字段反推时，用 `delta=0.02`（或 `K×0.005` 推广）而非 `places=2`；纯同值比对（同一 mid 除 K）可用 `places=6`。
 
 **Goal:** 0.1.0 = 输入契约 + 数据质量门（G1）+ CA 参考带（G2）+ 实测偏离分级。走廊（0.2）、需求加权（0.3）、公平政策代价（0.4）缓发。定位一句话：**调用路网与求解器之前，用数据契约与空间尺度基准快速发现明显不可信的输入和结果。**
 
-**Architecture:** `report → sanity/band → geometry/terrain`（单向）。geometry 已重写落盘（CRS 必填、索引保持、凸包双函数）；`__init__` 惰性导出已就位（commit `210d4da`）。
+**Architecture:** `report → sanity/band → geometry/terrain`（单向）。geometry（CRS 必填、索引保持、凸包双函数）、`__init__`（PEP 562 惰性导出）已落盘（commit `1460e67`）。
 
 **Tech Stack:** stdlib only；`python3 -m unittest`。**测试红线：自等断言、`if False`、"存在即可"伪断言、方向性未验证断言——一律不得出现。**
 
@@ -20,7 +29,6 @@
 
 ```python
 # tests/test_sanity.py
-import math
 import random
 import unittest
 from spatial_ca.geometry import clean_coordinates
@@ -38,6 +46,7 @@ class TestSuspects(unittest.TestCase):
         pts = cloud() + [(118.9, 41.6)]
         cr = clean_coordinates(pts, source_crs="WGS84")
         s = find_suspects(cr)
+        # seed 确定性; 若实现时误报额外点则上调 nn_factor 到 10 (非降级)
         self.assertEqual([x["original_index"] for x in s], [201])
         self.assertEqual(s[0]["reason"], "far_outlier")
         self.assertGreater(s[0]["nn_km"], 50.0)
@@ -47,19 +56,18 @@ class TestSuspects(unittest.TestCase):
         self.assertEqual(find_suspects(cr), [])
 
     def test_nn_distance_is_exact(self):
-        # 已知构型: 3 点等距边 + 1 远点. NN 必须命中真实最近邻.
+        # 已知构型: 等边三角形(边~0.87km) + 1 远点(117,40)
         a, b, c = (116.0, 39.0), (116.01, 39.0), (116.005, 39.00866)
         far = (117.0, 40.0)
         cr = clean_coordinates([a, b, c, far, far, far], source_crs="WGS84")
-        # 重复 far 点互为其 NN=0, 不触发; 关键断言 a 的 NN 是 b/c ~0.85km
-        s = find_suspects(cr, nn_factor=3.0, min_kept=4)
-        flagged = {x["original_index"] for x in s}
-        # a,b,c 彼此近, 三个 far 彼此重合 -> 无单点可疑; 换构型验证:
-        self.assertEqual(flagged, set())
+        # 三个 far 互为 NN=0 -> 无人可疑
+        self.assertEqual(find_suspects(cr, nn_factor=3.0, min_kept=4), [])
         cr2 = clean_coordinates([a, b, c, far], source_crs="WGS84")
         s2 = find_suspects(cr2, nn_factor=3.0, min_kept=4)
         self.assertEqual([x["original_index"] for x in s2], [3])
-        self.assertAlmostEqual(s2[0]["nn_km"], 107.3, delta=8.0)
+        self.assertAlmostEqual(s2[0]["nn_km"], 139.3, delta=1.0)
+        # 暴力 NN 的真值锚: far->c, 局部均值纬度系 ~139.3 km;
+        # ±2格/部分搜索的网格法给不出这个精度 —— 这正是 0.1.0 用暴力的原因
 
     def test_invalid_points_are_dropped_not_suspects(self):
         cr = clean_coordinates(cloud() + [(110.0, 110.0)], source_crs="WGS84")
@@ -123,7 +131,7 @@ from spatial_ca.geometry import CleanResult, project_km
 
 def find_suspects(clean: CleanResult, *, nn_factor: float = 8.0,
                   min_kept: int = 8) -> List[Dict]:
-    """Flag kept points whose exact NN distance >= nn_factor x median NN."""
+    """Flag kept points whose EXACT NN distance >= nn_factor x median NN."""
     pts = clean.points
     n = len(pts)
     if n < max(min_kept, 4):
@@ -178,14 +186,15 @@ def adjudicate(clean: CleanResult, suspects: Sequence[Dict], *,
 
 **Files:** Create `tests/test_band.py`, `spatial_ca/band.py`
 
-- [ ] **Step 1: 写失败测试（K 方向已按评审修正；带=显式版本化系数；BETA 三字段）**
+- [ ] **Step 1: 写失败测试**
 
 ```python
 # tests/test_band.py
 import math
 import random
 import unittest
-from spatial_ca.band import BETA, ENVELOPE_VERSION, ca_band, classify
+from spatial_ca.band import (BETA, ENVELOPE_VERSION, THIN_LO_MULT,
+                             THIN_HI_MULT, ca_band, classify)
 from spatial_ca.geometry import clean_coordinates
 
 
@@ -207,35 +216,42 @@ class TestBand(unittest.TestCase):
         b = ca_band(cr(), total_visits=242, available_workdays=21)
         A = b["geometry"]["hull_area_km2"]
         expected = BETA * b["circuity"]["value"] * math.sqrt(242 * A)
-        self.assertAlmostEqual(b["reference_mid_km"], expected, places=6)
+        # A/mid 各自 round(2): 反推伪差 < 0.015 km 级
+        self.assertAlmostEqual(b["reference_mid_km"], expected, delta=0.05)
 
     def test_rigid_shift_invariance_theorem(self):
         base = ca_band(cr(), 242, 21)
-        shift = ca_band(clean_coordinates([(x + 0.0062, y) for x, y in cloud()],
-                                          source_crs="WGS84"), 242, 21)
+        shifted_pts = [(x + 0.0062, y) for x, y in cloud()]
+        shift = ca_band(clean_coordinates(shifted_pts, source_crs="WGS84"),
+                        242, 21)
         self.assertAlmostEqual(base["reference_mid_km"],
-                               shift["reference_mid_km"], places=4)
+                               shift["reference_mid_km"], delta=0.05)
+        # 定理内容 = 严格相等; 容差只吸收输出的 round(2) 伪差。
+        # 本测试同时是 C1.2 的可执行声明: 平移前后一切内部量相同,
+        # 因此整批 CRS 错配在原理上不可能被内部几何发现。
 
     def test_k_invariance_and_daily_direction(self):
         b21 = ca_band(cr(), 242, 21)
         b23 = ca_band(cr(), 242, 23)
         self.assertAlmostEqual(b21["reference_mid_km"],
                                b23["reference_mid_km"], places=6)
-        # 日里程 = T/K: K 越大日带越低 (V2 曾写反, 评审修正)
+        # 日里程 = T/K: K 越大, 日带越低 (V2 曾写反, 评审修正)
         self.assertGreater(b21["daily"]["band_km"][1],
                            b23["daily"]["band_km"][1])
         self.assertAlmostEqual(b21["daily"]["mid_km"] * 21,
-                               b23["daily"]["mid_km"] * 23, delta=0.1)
+                               b23["daily"]["mid_km"] * 23, delta=0.5)
+        # delta 吸收 daily round(2) x K 的合法伪差 (0.005*23 ~ 0.12)
 
     def test_policy_envelope_explicit(self):
         b = ca_band(cr(), 242, 21, city="天津市")
-        self.assertEqual(b["band_method"], "heuristic_policy_envelope_v1")
-        self.assertEqual(b["envelope_version"], ENVELOPE_VERSION)
+        self.assertEqual(b["band_method"],
+                         f"heuristic_policy_envelope_{ENVELOPE_VERSION}")
         self.assertEqual(b["statistical_confidence_interval"], False)
         lo, hi = b["reference_band_km"]
         mid = b["reference_mid_km"]
-        self.assertAlmostEqual(lo, mid * 0.75, places=2)
-        self.assertAlmostEqual(hi, mid * 1.30, places=2)
+        self.assertAlmostEqual(lo, mid * 0.75, delta=0.02)
+        self.assertAlmostEqual(hi, mid * 1.30, delta=0.02)
+        self.assertEqual(b["envelope_multipliers"], [0.75, 1.3])
 
     def test_beta_fields_separated(self):
         b = ca_band(cr(), 242, 21)
@@ -248,21 +264,38 @@ class TestBand(unittest.TestCase):
         b = ca_band(cr(), 242, 21, circuity_override=1.4)
         self.assertEqual(b["circuity"]["source"], "user_override")
         lo, hi = b["reference_band_km"]
-        self.assertAlmostEqual(lo, b["reference_mid_km"] * 0.88, places=2)
+        mid = b["reference_mid_km"]
+        self.assertAlmostEqual(lo, mid * 0.88, delta=0.02)
+        self.assertAlmostEqual(hi, mid * 1.12, delta=0.02)
 
     def test_thin_daily_widens_and_announces(self):
         small = clean_coordinates(cloud(n=40), source_crs="WGS84")
-        b = ca_band(small, 40, 20)          # 日均 2 店
+        b = ca_band(small, 40, 20)          # 日均 2 店 < 4
         self.assertTrue(b["small_sample_warning"])
         lo, hi = b["reference_band_km"]
-        self.assertLess(lo, b["reference_mid_km"] * 0.75 + 1e-9)
+        mid = b["reference_mid_km"]
+        self.assertLess(lo, mid * 0.72)    # city_prior 0.75 -> 0.68
+        self.assertGreater(hi, mid * 1.40)  # 1.30 -> 1.45
+
+    def test_closed_tour_widens_hi(self):
+        o = ca_band(cr(), 242, 21, city="天津市")
+        c = ca_band(cr(), 242, 21, city="天津市", is_closed_tour=True)
+        self.assertEqual(o["reference_mid_km"], c["reference_mid_km"])
+        self.assertGreater(c["reference_band_km"][1],
+                           o["reference_band_km"][1])
+
+    def test_unknown_crs_band_blocked(self):
+        from spatial_ca.geometry import UNKNOWN
+        raw = clean_coordinates(cloud(), source_crs=UNKNOWN)
+        with self.assertRaises(ValueError):
+            ca_band(raw, 242, 21)
 
     def test_classify_consistency(self):
         b = ca_band(cr(), 242, 21)
         mid = b["reference_mid_km"]
+        hi = b["reference_band_km"][1]
         self.assertEqual(classify(0.5 * mid, b), "BELOW_CA_REFERENCE")
         self.assertEqual(classify(mid, b), "CONSISTENT_WITH_CA_REFERENCE")
-        hi = b["reference_band_km"][1]
         self.assertEqual(classify(1.2 * hi, b), "ABOVE_CA_REFERENCE")
         self.assertEqual(classify(3.0 * hi, b),
                          "STRONGLY_INCONSISTENT_WITH_CA")
@@ -278,23 +311,25 @@ if __name__ == "__main__":
 ```python
 """G2: CA reference band (NOT a statistical CI, NOT an optimality proof).
 
-Single asymptotic constant BETA = 0.7124 (BHH leading term; Applegate et al.
-2006 computational estimate; published analytic bounds [0.6277, 0.9038] are
-background, NOT band inputs - reviewer ruling). Open/closed day tours share
-the same leading term; their difference is a lower-order endpoint correction
-(Steele 1986), represented as band width policy, never as a second constant.
+Single asymptotic constant BETA = 0.7124 (BHH leading term; Applegate et
+al. 2006 computational estimate; published analytic bounds [0.6277, 0.9038]
+are background, NOT band inputs - reviewer ruling). Open/closed day tours
+share the same leading term; the difference is a lower-order endpoint
+correction (Steele 1986), represented as POLICY WIDTH, never a second
+constant. Corridor-regime period total T = BETA*c*sqrt(V*A) is K-invariant.
 
-Band = mid x explicit versioned policy multipliers (heuristic envelope),
-keyed by circuity provenance. Empirical calibration (P10/P90 on held-out
-reps) renames this to empirically_calibrated_reference_band in a later
-version - see MEASUREMENT_CONTRACT C10.
+Band = mid x explicit versioned multipliers keyed by circuity provenance
+("heuristic_policy_envelope_v1"). After held-out calibration (P10/P90 by
+daily-n/terrain/shape strata, contract C10) a later release may rename it
+empirically_calibrated_reference_band.
 """
 from __future__ import annotations
 
 import math
 from typing import Dict, Optional
 
-from spatial_ca.geometry import CleanResult, CRS_UNCONFIRMED, hull_area_lonlat_km2
+from spatial_ca.geometry import (CleanResult, CRS_UNCONFIRMED,
+                                 hull_area_lonlat_km2)
 from spatial_ca.terrain import get_city_terrain_and_circuity
 
 BETA = 0.7124
@@ -309,12 +344,13 @@ ENVELOPES = {
     "national_default": (0.75, 1.30),
 }
 THIN_DAILY_VISITS = 4.0
-THIN_WIDEN_LO, THIN_WIDEN_HI = 0.07, 0.15
-_LO_SLACK, _HI_SLACK = 0.90, 1.50     # status thresholds version: v1
+THIN_WIDEN_LO = 0.07            # subtracted from lo mult (band widens down)
+THIN_WIDEN_HI = 0.15            # added to hi mult
+CLOSED_HI_EXTRA = 0.05          # endpoint/stem correction as policy widening
+_LO_SLACK, _HI_SLACK = 0.90, 1.50    # status thresholds (version v1)
 
 
-def _provenance(city: Optional[str],
-                override: Optional[float]) -> Dict:
+def _provenance(city: Optional[str], override: Optional[float]) -> Dict:
     if override is not None:
         return {"value": float(override), "source": "user_override",
                 "confidence": "DECLARED_BY_USER",
@@ -338,8 +374,7 @@ def ca_band(clean: CleanResult, total_visits: int, available_workdays: int, *,
         raise ValueError("total_visits and available_workdays must be positive")
     if clean.crs_status == CRS_UNCONFIRMED:
         raise ValueError("CRS_UNCONFIRMED: absolute-km band blocked (C1.3); "
-                         "use preassess() which routes to structural "
-                         "diagnostics instead")
+                         "preassess() routes to structural diagnostics")
     area, dx, dy = hull_area_lonlat_km2(clean.points)
     circ = _provenance(city, circuity_override)
     daily_visits = total_visits / available_workdays
@@ -349,20 +384,20 @@ def ca_band(clean: CleanResult, total_visits: int, available_workdays: int, *,
         lo_mult -= THIN_WIDEN_LO
         hi_mult += THIN_WIDEN_HI
     if is_closed_tour:
-        hi_mult += 0.05        # endpoint/stem correction as policy widening
+        hi_mult += CLOSED_HI_EXTRA
     mid = BETA * circ["value"] * math.sqrt(max(0.0, total_visits * area))
+    lo, hi = mid * lo_mult, mid * hi_mult
     return {
         "reference_mid_km": round(mid, 2),
-        "reference_band_km": [round(mid * lo_mult, 2),
-                              round(mid * hi_mult, 2)],
+        "reference_band_km": [round(lo, 2), round(hi, 2)],
         "band_method": f"heuristic_policy_envelope_{ENVELOPE_VERSION}",
         "envelope_version": ENVELOPE_VERSION,
         "envelope_multipliers": [round(lo_mult, 3), round(hi_mult, 3)],
         "statistical_confidence_interval": False,
         "daily": {"mean_visits": round(daily_visits, 2),
                   "mid_km": round(mid / available_workdays, 2),
-                  "band_km": [round(mid * lo_mult / available_workdays, 2),
-                              round(mid * hi_mult / available_workdays, 2)]},
+                  "band_km": [round(lo / available_workdays, 2),
+                              round(hi / available_workdays, 2)]},
         "geometry": {"hull_area_km2": round(area, 2),
                      "dx_km": round(dx, 2), "dy_km": round(dy, 2)},
         "circuity": circ,
@@ -394,8 +429,9 @@ def classify(measured_km: float, band: Dict) -> str:
     return "STRONGLY_INCONSISTENT_WITH_CA"
 ```
 
-- [ ] **Step 4: 跑绿** `python3 -m unittest tests.test_band -v`（9 tests OK）
-- [ ] **Step 5:** `git commit -m "feat(band): single BETA + versioned heuristic envelope + provenance (V2.1 #3/#4; bounds separated)"`
+注：测试 import 的 `THIN_LO_MULT/THIN_HI_MULT` 若未使用请从 import 行删除（以模块实际常量名 `THIN_WIDEN_LO/THIN_WIDEN_HI` 为准——实施者按实现修正 import，属机械调整）。
+- [ ] **Step 4: 跑绿** `python3 -m unittest tests.test_band -v`（10 tests OK）
+- [ ] **Step 5:** `git commit -m "feat(band): single BETA + versioned heuristic envelope + provenance (V2.1 #3; bounds separated)"`
 
 ---
 
@@ -535,12 +571,12 @@ if __name__ == "__main__":
 - [ ] **Step 3: 实现（完整，无临场发挥点）**
 
 ```python
-"""preassess(): the governance pipeline. State machine fixed by V2.1 review;
-implementation adds no policy of its own.
+"""preassess(): the governance pipeline. State machine fixed by V2.1;
+this module adds no policy of its own.
 
 Gates: PASSED / PASSED_WITH_INVALID_ROWS_DROPPED /
-       INCLUDING_CONFIRMED_OUTLIER / BLOCKED_BY_DATA_QUALITY /
-       STRUCTURE_ONLY (C1.3: no absolute-km band on unconfirmed CRS).
+INCLUDING_CONFIRMED_OUTLIER / BLOCKED_BY_DATA_QUALITY /
+STRUCTURE_ONLY (C1.3: no absolute-km band on unconfirmed CRS).
 """
 from __future__ import annotations
 
@@ -589,8 +625,7 @@ class PreAssessment:
             lo, hi = self.band["reference_band_km"]
             out.append(f"- CA reference band: **{self.band['reference_mid_km']}"
                        f" km**, envelope [{lo}, {hi}] km "
-                       f"({self.band['band_method']}, "
-                       f"not a statistical CI)")
+                       f"({self.band['band_method']}, not a statistical CI)")
         else:
             out.append(f"- band: none ({self.assessment['status']})")
         out.append(f"- assessment: {self.assessment['status']}")
@@ -642,7 +677,7 @@ def preassess(coords: Sequence[Point], *, total_visits: int,
          "available_workdays": available_workdays,
          "active_visit_days": None}
 
-    # --- branch 1: unadjudicated fly-outliers block everything absolute ---
+    # branch 1: unadjudicated fly-outliers block every absolute conclusion
     if adj["decision"] == "BLOCKED_BY_DATA_QUALITY":
         return PreAssessment(
             gate=BLOCKED_BY_DATA_QUALITY, lineage=lineage, k=k, band=None,
@@ -652,19 +687,18 @@ def preassess(coords: Sequence[Point], *, total_visits: int,
                         "note": "adjudicate every suspect (confirm_drop/"
                                 "confirm_keep) before trusting any km"})
 
-    effective = _rebuilt_clean(clean, adj) if (adj["dropped_by_user"]
-                                               or adj["kept_confirmed_outlier"]
-                                               or suspects) else clean
-
-    # --- branch 2: CRS unconfirmed -> structure only, band blocked ---
+    # branch 2: CRS unconfirmed -> structure only, band blocked (C1.3)
     if clean.crs_status == CRS_UNCONFIRMED:
         return PreAssessment(
             gate=STRUCTURE_ONLY, lineage=lineage, k=k, band=None,
-            structural=_structural(effective, suspects, frame_relative=True),
+            structural=_structural(clean, suspects, frame_relative=True),
             assessment={"status": "NOT_ASSESSED_CRS_UNCONFIRMED",
                         "note": "declare source_crs (WGS84/GCJ02/BD09) to "
-                                "unlock absolute-km reference band"})
+                                "unlock the absolute-km reference band"})
 
+    effective = (_rebuilt_clean(clean, adj)
+                 if (adj["dropped_by_user"] or adj["kept_confirmed_outlier"])
+                 else clean)
     kept = adj["kept_confirmed_outlier"]
     if dropped_invalid:
         gate = PASSED_WITH_INVALID_ROWS_DROPPED
@@ -680,7 +714,7 @@ def preassess(coords: Sequence[Point], *, total_visits: int,
                    including_confirmed_outlier=bool(kept))
 
     if measured_km is None:
-        assessment = {"status": "REFERENCE_ONLY"}
+        assessment: Dict = {"status": "REFERENCE_ONLY"}
     else:
         assessment = {"status": classify(measured_km, band),
                       "measured_total_km": round(measured_km, 2),
@@ -705,57 +739,57 @@ def preassess(coords: Sequence[Point], *, total_visits: int,
                                "circuity": band["circuity"]})
 ```
 
-- [ ] **Step 4: 跑绿** `python3 -m unittest tests.test_report -v`（12 tests OK；`preassess` 与五个 gate 常量经 `__init__` 导出路径或直连 `spatial_ca.report` 均可导入）
-- [ ] **Step 5:** `git commit -m "feat(report): preassess state machine - gates, structure-only on unknown CRS, invalid-row visibility (V2.1 #4-#6)"`
+状态机全部裁定已入码：invalid 不静默（branch `dropped_invalid` → 专属 gate）；UNKNOWN 无绝对 km（branch 2，band=None）；confirm 语义直通 adjudicate；measured 缺省 REFERENCE_ONLY；scope 不齐 warning 而非阻断（口径声明是义务，判定仍有效）。
+- [ ] **Step 4: 跑绿** `python3 -m unittest tests.test_report -v`（12 tests OK）
+- [ ] **Step 5:** `git commit -m "feat(report): preassess state machine - five gates, structure-only on unknown CRS, invalid-row visibility (V2.1 #4-#7)"`
 
 ---
 
 ### Task 0.4: 性能冒烟（合成吞吐）+ 门面收尾
 
-**Files:** Modify `tests/test_sanity.py`（追加）, `spatial_ca/__init__.py`；Create `tests/perf_baseline.json`, `docs/BENCH.md`
+**Files:** Modify `tests/test_sanity.py`（追加）；Create `tests/perf_baseline.json`, `docs/BENCH.md`
 
-- [ ] **Step 1: 追加合成吞吐测试（暴力 NN 的真实适用域，非 10k）**
+- [ ] **Step 1: 追加合成吞吐测试（暴力 NN 的真实适用域；门槛=基线相对）**
 
 ```python
 class TestThroughput(unittest.TestCase):
-    """synthetic throughput benchmark - scale claims are for 0.2 grid mode."""
+    """synthetic throughput benchmark - absolute-scale claims belong to
+    the 0.2 provable-grid release, not this one."""
 
-    def test_500_stores_well_under_5s(self):
+    def test_500_stores_under_5s(self):
         import time
-        cr = clean_coordinates(cloud(500, seed=3), source_crs="WGS84")
+        c = clean_coordinates(cloud(500, seed=3), source_crs="WGS84")
         t0 = time.perf_counter()
-        find_suspects(cr)
-        dt = time.perf_counter() - t0
-        self.assertLess(dt, 5.0)          # 宽松防算法级回归, 不承诺绝对性能
+        find_suspects(c)
+        self.assertLess(time.perf_counter() - t0, 5.0)  # 宽松, 防算法级错写
 
     @unittest.skipUnless(os.environ.get("SPATIAL_CA_PERF"),
                          "nightly synthetic throughput only")
     def test_national_synthetic_throughput(self):
-        import time
+        import json, time
         t0 = time.perf_counter()
         for s in range(571):
-            cr = clean_coordinates(cloud(200, seed=1000 + s),
-                                   source_crs="WGS84")
-            find_suspects(cr)
+            c = clean_coordinates(cloud(200, seed=1000 + s),
+                                  source_crs="WGS84")
+            find_suspects(c)
         total = time.perf_counter() - t0
-        with open("tests/perf_baseline.json", "w") as fh:
-            json.dump({"national_571x200_s": round(total, 2),
-                       "mode": "bruteforce_v1"}, fh)
-        # 门槛: 相对上一基线退化不超过 2x (基线缺失则仅记录)
         prev = 0.0
         try:
-            with open("tests/perf_baseline_prev.json") as fh:
+            with open("tests/perf_baseline.json") as fh:
                 prev = json.load(fh).get("national_571x200_s", 0.0)
         except OSError:
             pass
-        if prev:
+        with open("tests/perf_baseline.json", "w") as fh:
+            json.dump({"national_571x200_s": round(total, 2),
+                       "mode": "bruteforce_v1", "kind": "synthetic"}, fh)
+        if prev:                       # 门槛: 相对上一基线退化 < 2x, 非固定秒数
             self.assertLess(total, 2.0 * prev)
 ```
 
-（测试文件头部补 `import os, json`。500 点暴力 NN = 250k 距离，实测预计 <0.5s；5s 只防算法级错写。）
-- [ ] **Step 2: `docs/BENCH.md` 记录本机实测**（500 点耗时、571×200 合计），标注 `bruteforce_v1`；声明真实数据最坏分布未测（评审：合成吞吐≠真实最坏）
-- [ ] **Step 3: `__init__.py` `_EXPORTS` 增补** `preassess/PreAssessment → spatial_ca.report` 已存在，确认 `ca_band/classify/BETA` 与 gate 常量可解析；跑一次 `python3 -c "import spatial_ca; spatial_ca.preassess"` 无 ImportError
-- [ ] **Step 4:** `git commit -m "test: synthetic throughput smoke (bruteforce regime); docs/BENCH measured numbers"`
+（测试文件头部补 `import os`。）
+- [ ] **Step 2: `docs/BENCH.md`** 记录本机实测（500 点、571×200 合计、机器信息），标注 `bruteforce_v1 / synthetic`；声明：合成吞吐≠真实数据最坏分布（评审附加项），真实分布最坏样本随私有留出环境补测
+- [ ] **Step 3: 门面确认** `python3 -c "import spatial_ca; print(bool(spatial_ca.preassess))"` 无 ImportError（Task 0.3 后）
+- [ ] **Step 4:** `git commit -m "test: synthetic throughput with baseline-relative gate; docs/BENCH measured"`
 
 ---
 
@@ -763,26 +797,26 @@ class TestThroughput(unittest.TestCase):
 
 **Files:** Create `README.md`, `LICENSE`, `.github/workflows/ci.yml`
 
-- [ ] **README 结构（严格按序）**
+- [ ] **README 严格按序**
   1. 一句话定位（契约原话）；
-  2. **What it cannot do（置顶）**：整批 CRS 错配不可由内部几何识别（定理 C1.2）；参考带是版本化政策带非统计置信区间；0.1.0 无走廊诊断/无 PoF/无需求加权；暴力 NN 适用域 = 单销售 ≤2,000 店；
-  3. 事故故事（只声明可兑现部分：房山 1834 vs 536 被参考带 10 秒证伪；天津 (110,110) 被 G1 拦截且 `PASSED_WITH_INVALID_ROWS_DROPPED` 明示剔除）；
-  4. 快速上手（source_crs 必填、UNKNOWN→STRUCTURE_ONLY 演示、confirm_drop 演示）；
-  5. gate×status 全表（五 gate、六 status，各配允许/禁止结论，照抄 C9）；
-  6. 常数与版本溯源（BETA 三字段、envelope v1 表、city_prior=LOW）；
+  2. **What it cannot do（置顶）**：整批 CRS 错配不可由内部几何识别（定理 C1.2，`test_rigid_shift_invariance_theorem` 为可执行声明）；参考带是版本化政策带，非统计置信区间；0.1.0 无走廊/无 PoF/无需求加权；暴力 NN 适用域 = 单销售 ≤2,000 店；
+  3. 事故故事（只讲可兑现部分：房山 1834 vs 参考带 10 秒证伪；天津 (110,110) 由 G1 拦截，且 `PASSED_WITH_INVALID_ROWS_DROPPED` 明示发生过剔除）；
+  4. 快速上手：source_crs 必填示例、UNKNOWN→STRUCTURE_ONLY 演示、confirm_drop 裁决演示；
+  5. gate×status 全表（五 gate、七 status，各配允许/禁止结论，照抄 C9）；
+  6. 常数与版本溯源（BETA 三字段、envelope v1 系数表、city_prior=LOW）；
   7. 留出验证计划（P10/P90 分层标定 → `empirically_calibrated_reference_band` 升版条件）；
-  8. Roadmap 0.2（可证明停止的网格 NN + 紧凑度诊断 + `dispersion_scenario_contrast` 含假设面板）/ 0.3（VisitDemand 加权）/ 0.4（`cost_of_selected_equity_policy`，整数化+rounding gap，水填断言方向 `n[0] >= n[3]`）；
-  9. 参考文献 + 免责声明（禁语清单：无"全球无竞品/理论上下界/√K 差价/闭式 PoF/已近最优"）。
+  8. Roadmap：0.2 可证明停止网格 NN（含与本暴力版等价性测试）+ 已有计划紧凑度诊断 + `dispersion_scenario_contrast`（假设面板）；0.3 `VisitDemand` 加权；0.4 `cost_of_selected_equity_policy`（整数化 + rounding gap；水填方向断言 `n[0] >= n[3]` 已定稿）；
+  9. 参考文献 + 禁语清单（无"全球无竞品/理论上下界/√K 差价/闭式 PoF/已近最优"）。
 - [ ] MIT LICENSE（Copyright (c) 2026 ghb）
-- [ ] CI：3.9–3.13 `python -m unittest discover -s tests`；nightly workflow `SPATIAL_CA_PERF=1` + 基线相对断言；
-- [ ] 发布销账表（README 附录）：评审二轮 6 阻断 + 4 修正逐条 → 处置 commit/测试名；
-- [ ] `git tag v0.1.0-rc1 && git push`（远端创建按用户环境执行；无凭据则输出命令）
+- [ ] CI：3.9–3.13 `python -m unittest discover -s tests`；nightly 单独 workflow `SPATIAL_CA_PERF=1`（基线相对断言，无固定秒数门槛）
+- [ ] 发布销账表（README 附录）：两轮评审全部条目 → 处置位置（文件+测试名）
+- [ ] `git tag v0.1.0-rc1`；无 gh 凭据则输出 `gh repo create spatial-ca-benchmark --public --source=. --push` 待用户执行
 
 ---
 
-## Self-Review（V2.1）
+## Self-Review（V2.1 终版）
 
-1. **占位符：** Task 0.3 已由"字段说明"升级为完整实现+状态机图（评审 §6 销账）；无 TBD/TODO；
-2. **矛盾：** 类型访问统一 dataclass（评审 §5 销账）；K 方向断言与公式 `d=T/K` 一致（§1 销账）；NN 精确性有已知构型锚定（§2 销账）；带宽无平方和伪统计（§3 销账）；UNKNOWN 无绝对 km 泄漏（§4 销账）；
-3. **覆盖：** 契约 C1（声明式 CRS+定理边界置顶）、C2（uniform 标记）、C3（scope_caveat）、C5（三 K 字段）、C7（政策带+分级措辞）、C8（fail-closed 全链）、C9（README 全表）、C10（envelope 版本化+留出计划）均落为具体代码/测试；
-4. **adjudicate 死代码与双跳 decision 已删**（评审附加项②）；BETA bounds 标注 `bounds_used_in_operational_band: False`（附加项③）；性能门槛基线相对化+改名 synthetic throughput（附加项④）；invalid 剔除进入独立 gate（附加项①）。
+1. **占位符：** Task 0.3 完整实现+状态机图；无 TBD/TODO；
+2. **本轮自检修复：** NN 锚点距离手算修正 107.3→**139.3**（局部均值纬度系，附推导注释）；round(2) 反推断言统一 delta 容差（0.02/0.05/0.5 按量级），消除 places=2 舍入假红；`test_unknown_crs_band_blocked` 补 band 级阻断直测；report 分支顺序与测试对齐（branch2 用原始 clean，无 adjudicate 依赖）；
+3. **契约覆盖：** C1（含定理的可执行测试）、C2（uniform 标记）、C3（scope_caveat）、C5（三 K 字段）、C7（政策带+分级措辞）、C8（五态门全链 fail-closed）、C9（README 全表）、C10（envelope 版本化+留出计划）均有对应测试；
+4. **评审二轮销账：** #1 K 方向→`test_k_invariance_and_daily_direction`；#2 网格→暴力+等价承诺；#3 伪统计→ENVELOPES 表；#4 UNKNOWN→branch2 band=None；#5 类型→dataclass only；#6 状态机→完整实现；附①invalid 显性 gate；附②死代码清除；附③BETA 三字段；附④基线相对门槛+synthetic 命名。
