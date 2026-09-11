@@ -98,6 +98,13 @@ class TestBand(unittest.TestCase):
         with self.assertRaises(ValueError):
             ca_band(raw, 242, 21)
 
+    def test_degenerate_flag_not_swallowed(self):
+        line = clean_coordinates([(116.0, 39.0), (116.01, 39.0),
+                                  (116.02, 39.0), (116.03, 39.0)],
+                                 source_crs="WGS84")
+        b = ca_band(line, 8, 4)
+        self.assertTrue(b["degenerate_geometry"])
+
     def test_classify_consistency(self):
         b = ca_band(cr(), 242, 21)
         mid = b["reference_mid_km"]

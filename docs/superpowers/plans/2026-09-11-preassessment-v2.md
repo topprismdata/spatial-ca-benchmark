@@ -193,8 +193,7 @@ def adjudicate(clean: CleanResult, suspects: Sequence[Dict], *,
 import math
 import random
 import unittest
-from spatial_ca.band import (BETA, ENVELOPE_VERSION, THIN_LO_MULT,
-                             THIN_HI_MULT, ca_band, classify)
+from spatial_ca.band import BETA, ENVELOPE_VERSION, ca_band, classify
 from spatial_ca.geometry import clean_coordinates
 
 
@@ -289,6 +288,14 @@ class TestBand(unittest.TestCase):
         raw = clean_coordinates(cloud(), source_crs=UNKNOWN)
         with self.assertRaises(ValueError):
             ca_band(raw, 242, 21)
+
+    def test_degenerate_flag_not_swallowed(self):
+        from spatial_ca.geometry import project_km, hull_area_xy
+        line = clean_coordinates([(116.0, 39.0), (116.01, 39.0),
+                                  (116.02, 39.0), (116.03, 39.0)],
+                                 source_crs="WGS84")
+        b = ca_band(line, 8, 4)
+        self.assertTrue(b["degenerate_geometry"])
 
     def test_classify_consistency(self):
         b = ca_band(cr(), 242, 21)
@@ -409,6 +416,9 @@ def ca_band(clean: CleanResult, total_visits: int, available_workdays: int, *,
                          "into policy width"},
         "k_invariant_within_model": True,
         "crs_status": clean.crs_status,
+        "degenerate_geometry": area <= 0.0,  # <3 pts/collinear -> band=[0,0];
+        # report must map this to NOT_ASSESSED_DEGENERATE_GEOMETRY, never
+        # STRONGLY_INCONSISTENT_WITH_CA (quality review, V2.1)
         "small_sample_warning": thin,
         "including_confirmed_outlier": including_confirmed_outlier,
         "is_closed_tour": is_closed_tour,
@@ -429,8 +439,8 @@ def classify(measured_km: float, band: Dict) -> str:
     return "STRONGLY_INCONSISTENT_WITH_CA"
 ```
 
-注：测试 import 的 `THIN_LO_MULT/THIN_HI_MULT` 若未使用请从 import 行删除（以模块实际常量名 `THIN_WIDEN_LO/THIN_WIDEN_HI` 为准——实施者按实现修正 import，属机械调整）。
-- [ ] **Step 4: 跑绿** `python3 -m unittest tests.test_band -v`（10 tests OK）
+> 变更记录：V2.1 质量评审新增 `degenerate_geometry` 守护键与 `NOT_ASSESSED_DEGENERATE_GEOMETRY` 状态映射（Task 0.2/0.3 代码块已内联）。
+- [ ] **Step 4: 跑绿** `python3 -m unittest tests.test_band -v`（12 tests OK；含 degenerate 与 unknown-crs 直测）
 - [ ] **Step 5:** `git commit -m "feat(band): single BETA + versioned heuristic envelope + provenance (V2.1 #3; bounds separated)"`
 
 ---
@@ -715,6 +725,10 @@ def preassess(coords: Sequence[Point], *, total_visits: int,
 
     if measured_km is None:
         assessment: Dict = {"status": "REFERENCE_ONLY"}
+    elif band["degenerate_geometry"]:
+        assessment = {"status": "NOT_ASSESSED_DEGENERATE_GEOMETRY",
+                            "note": "collinear/insufficient points: no "
+                                    "2D service area to benchmark"}
     else:
         assessment = {"status": classify(measured_km, band),
                       "measured_total_km": round(measured_km, 2),
