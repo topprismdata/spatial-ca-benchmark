@@ -71,6 +71,20 @@ class TestAdjudication(unittest.TestCase):
         self.assertEqual(a["kept_confirmed_outlier"], [201])
         self.assertEqual(len(a["points"]), 202)
 
+    def test_unknown_drop_index_blocks(self):
+        a = adjudicate(self.cr, self.susp, confirm_drop=(0, 201),
+                       confirm_keep=())
+        self.assertEqual(a["decision"], "BLOCKED_BY_DATA_QUALITY")
+        self.assertEqual(a["error"], "unknown_drop_indices")
+        self.assertEqual(a["unresolved"], [0])
+
+    def test_conflicting_adjudication_blocks(self):
+        a = adjudicate(self.cr, self.susp, confirm_drop=(201,),
+                       confirm_keep=(201,))
+        self.assertEqual(a["decision"], "BLOCKED_BY_DATA_QUALITY")
+        self.assertEqual(a["error"], "conflicting_adjudication")
+        self.assertEqual(a["conflicts"], [201])
+
 
 if __name__ == "__main__":
     unittest.main()

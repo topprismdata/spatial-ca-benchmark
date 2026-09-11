@@ -48,10 +48,21 @@ def adjudicate(clean: CleanResult, suspects: Sequence[Dict], *,
     if unresolved:
         return {"decision": "BLOCKED_BY_DATA_QUALITY",
                 "unresolved": unresolved}
+    conflicts = sorted(drop & keep)
+    if conflicts:
+        return {"decision": "BLOCKED_BY_DATA_QUALITY",
+                "error": "conflicting_adjudication",
+                "conflicts": conflicts}
+    unknown = sorted(drop - flagged)
+    if unknown:
+        return {"decision": "BLOCKED_BY_DATA_QUALITY",
+                "error": "unknown_drop_indices",
+                "unresolved": unknown}
+    drop_flagged = drop & flagged
     new_pts = []
     new_idx = []
     for pos, orig in enumerate(clean.kept_indices):
-        if orig in drop:
+        if orig in drop_flagged:
             continue
         new_pts.append(clean.points[pos])
         new_idx.append(orig)
