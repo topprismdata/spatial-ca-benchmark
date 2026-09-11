@@ -1,6 +1,6 @@
 # spatial-ca-benchmark：单销售事前判断框架 设计文档
 
-> 状态：**评审中**（待用户批准后进入 writing-plans）
+> 状态：**已定稿**（2026-09-11 用户批准，含 √K 恒等式、K 日质心投影、PoF 诚实标注、母仓 shim 缓行四项裁量）
 > 日期：2026-09-11
 > 仓库：`/Users/ghb/spatial-ca-benchmark`（独立 GitHub 项目，与 visit-scheduling-optimizer 母仓解耦）
 
