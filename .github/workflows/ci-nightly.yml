@@ -1,0 +1,22 @@
+name: Nightly synthetic throughput
+
+on:
+  schedule:
+    - cron: "30 20 * * *"   # 20:30 UTC daily (= 04:30 Beijing)
+  workflow_dispatch:
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    env:
+      SPATIAL_CA_PERF: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Synthetic throughput benchmark
+        # Baseline-relative gate (tests/perf_baseline.json, degradation < 2x);
+        # no fixed-second threshold. Absolute-scale claims belong to the
+        # 0.2 provable-grid release.
+        run: python -m unittest discover -s tests
