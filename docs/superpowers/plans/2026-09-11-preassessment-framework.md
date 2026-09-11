@@ -1,5 +1,6 @@
 # 单销售事前判断框架 实施计划 (Pre-Assessment Framework Implementation Plan)
 
+> **⚠ 已被 v2 取代（2026-09-11 评审 M0 返工）。** 本 v1 计划冻结仅作历史参考：其中 `理论区间/√K premium/PoF 闭式精确` 表述、水填方向断言、自等断言、索引漂移与二次投影风险均违反 `docs/MEASUREMENT_CONTRACT.md`，禁止按本文施工。现行计划：`2026-09-11-preassessment-v2.md`。
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 按已定稿 spec（`docs/superpowers/specs/2026-09-11-preassessment-framework-design.md`）实现 `spatial-ca` 包：G1 数据体检 / G2 CA 区间 / G3 走廊诊断 / G4 双轴平衡+PoF / G5 杠杆敏感性，零运行时依赖，stdlib unittest。
