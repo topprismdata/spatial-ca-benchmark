@@ -1,4 +1,5 @@
 # tests/test_sanity.py
+import os
 import random
 import unittest
 from spatial_ca.geometry import clean_coordinates
@@ -84,6 +85,40 @@ class TestAdjudication(unittest.TestCase):
         self.assertEqual(a["decision"], "BLOCKED_BY_DATA_QUALITY")
         self.assertEqual(a["error"], "conflicting_adjudication")
         self.assertEqual(a["conflicts"], [201])
+
+
+class TestThroughput(unittest.TestCase):
+    """synthetic throughput benchmark - absolute-scale claims belong to
+    the 0.2 provable-grid release, not this one."""
+
+    def test_500_stores_under_5s(self):
+        import time
+        c = clean_coordinates(cloud(500, seed=3), source_crs="WGS84")
+        t0 = time.perf_counter()
+        find_suspects(c)
+        self.assertLess(time.perf_counter() - t0, 5.0)  # 宽松, 防算法级错写
+
+    @unittest.skipUnless(os.environ.get("SPATIAL_CA_PERF"),
+                         "nightly synthetic throughput only")
+    def test_national_synthetic_throughput(self):
+        import json, time
+        t0 = time.perf_counter()
+        for s in range(571):
+            c = clean_coordinates(cloud(200, seed=1000 + s),
+                                  source_crs="WGS84")
+            find_suspects(c)
+        total = time.perf_counter() - t0
+        prev = 0.0
+        try:
+            with open("tests/perf_baseline.json") as fh:
+                prev = json.load(fh).get("national_571x200_s", 0.0)
+        except OSError:
+            pass
+        with open("tests/perf_baseline.json", "w") as fh:
+            json.dump({"national_571x200_s": round(total, 2),
+                       "mode": "bruteforce_v1", "kind": "synthetic"}, fh)
+        if prev:                       # 门槛: 相对上一基线退化 < 2x, 非固定秒数
+            self.assertLess(total, 2.0 * prev)
 
 
 if __name__ == "__main__":
