@@ -9,7 +9,7 @@ circuity == 1.
 Prediction: sparse mid = beta*sqrt(V*A_hull); dense anchor = beta*sqrt(V*A*K).
 Solver-gap audit: Held-Karp exact on 30 instances n<=12.
 """
-import json, math, random
+import json, math, os, random
 import numpy as np
 from scipy.spatial import ConvexHull
 
@@ -78,6 +78,7 @@ def _local_search(pts, start):
     np.fill_diagonal(d2, np.inf)
     knn = [set(int(j) for j in row) for row in
            np.argsort(d2, axis=1)[:, :min(10, n - 1)]]
+    pos = {v: i for i, v in enumerate(tour)}
     improved = True
     while improved:
         improved = False
@@ -157,11 +158,14 @@ def held_karp(pts):
     return min(dp[full][u] + math.dist(pts[u], pts[0]) for u in range(1, n))
 
 # ---------------------------------------------------------------- districting
-def recursive_bisect(pts, K):
-    """K compact districts by recursive median cuts along longer bbox axis."""
+def recursive_bisect(pts, K, want_siblings=False):
+    """K compact districts by recursive median cuts along longer bbox axis.
+    With want_siblings, also returns sibling map (paired by same split node).
+    """
     import heapq
     arr = np.array(pts)
     groups = [list(range(len(pts)))]
+    sib = {}
     heap = [(-len(groups[0]), 0)]
     while len(groups) < K:
         _, gi = heapq.heappop(heap)
@@ -174,10 +178,14 @@ def recursive_bisect(pts, K):
         order = sorted(g, key=lambda i: pts[i][axis])
         m = len(order) // 2
         groups[gi] = order[:m]
+        b_idx = len(groups)
         groups.append(order[m:])
+        sib[gi] = b_idx
+        sib[b_idx] = gi
         heapq.heappush(heap, (-len(order[:m]), gi))
-        heapq.heappush(heap, (-len(order[m:]), len(groups) - 1))
-    return [g for g in groups if g]
+        heapq.heappush(heap, (-len(order[m:]), b_idx))
+    out = [g for g in groups if g]
+    return (out, sib) if want_siblings else out
 
 # ---------------------------------------------------------------- configs
 def build_configs():
@@ -207,11 +215,42 @@ def run_config(cid, cfg):
     a_hull = ConvexHull(np.array(pts)).volume
 
     if cfg["part"] in ("A", "A2", "C"):
-        districts = recursive_bisect(pts, K)
+        # design §3.1 R1 (frozen): repeat visits land in the SIBLING
+        # district (adjacent territory, different workday)
+        districts, sib = recursive_bisect(pts, K, want_siblings=True)
+        # design §3.1 R2 (frozen): boundary-clip repeats -> day sets stay
+        # compact (sibling day tours a thin strip of shared-border territory)
+        day_sets = [set(g) for g in districts]
+        n_rep = V - n
+        if n_rep > 0 and K > 1:
+            per = max(1, n_rep // len(districts))
+            extra = {di: 0 for di in range(len(districts))}
+            rem = n_rep
+            pairs = [(d, sib[d]) for d in sib if d < sib[d] and len(districts[d]) > 1]
+            for di in range(len(districts)):
+                j = sib.get(di)
+                if j is None or len(districts[di]) < 2 or di > j:
+                    continue
+                dA, dB = districts[di], districts[j]
+                # shared-border proxy: median of A and B centroids
+                cx = (sum(pts[p][0] for p in dA) / len(dA)
+                      + sum(pts[p][0] for p in dB) / len(dB)) / 2
+                cy = (sum(pts[p][1] for p in dA) / len(dA)
+                      + sum(pts[p][1] for p in dB) / len(dB)) / 2
+                t = min(per + (1 if rem > di * per and rem > (di + 1) * per else 0),
+                        len(dA), rem)
+                if t <= 0:
+                    continue
+                rank = sorted(dA, key=lambda p: math.hypot(pts[p][0] - cx,
+                                                           pts[p][1] - cy))
+                for p in rank[:t]:
+                    day_sets[j].add(p)
+                extra[di] += t
+                rem -= t
         true_km = 0.0
         a_eff = 0.0
-        for g in districts:
-            sub = [pts[i] for i in g]
+        for ds in day_sets:
+            sub = [pts[i] for i in sorted(ds)]
             true_km += tsp_solve(sub)
             if len(sub) >= 3:
                 a_eff += ConvexHull(np.array(sub)).volume
@@ -244,8 +283,9 @@ def main():
         print(f"[{r['part']:>2}] {r['shape']:<8} n={r['n']:>5} "
               f"{'d' if r['part'] != 'B' else 'f'}={r.get('d', r.get('f')):>4} "
               f"K={r['K']:>2} A={r['A_hull']:>8.1f} true={r['true_km']:>9.1f} "
-              f"pred={r['pred']:>9.1f} ratio={r['ratio']:.3f}")
+              f"pred={r['pred']:>9.1f} ratio={r['ratio']:.3f}", flush=True)
 
+    os.makedirs("output", exist_ok=True)
     json.dump(dict(solver_gap=dict(mean=float(np.mean(gaps)),
                                    max=float(max(gaps))),
                    rows=rows),

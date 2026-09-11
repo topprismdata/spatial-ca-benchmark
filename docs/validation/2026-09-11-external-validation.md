@@ -66,36 +66,47 @@ validation sources available.
 - Open-source data for visit planning with real road distances is extremely
   rare (commercial sensitivity); Fangshan + Guangzhou remain the validation basis
 
-## Synthetic Validation (2026-09-11)
+## Pre-registered Synthetic Validation v1 (2026-09-12, 148 configs)
 
-Generated 45 configurations (n ∈ {100,150,200,300,500} × f ∈ {1.0,1.2,1.5} × K ∈ {4,9,21})
-with uniform random points in 10×10 km, compact √K×√K grid partition, NN+2opt TSP per cell.
+Design frozen before run: `docs/superpowers/plans/2026-09-11-synthetic-validation-design.md`.
+Factors: 6 shapes (square/rect4x1/disk/L-shape/ring/gauss5) x n(100-1600) x
+density d(0.15/1.0/4.0 km2/store, areas 15-6400 km2); K-invariance subtest;
+dense anchor (f=3/4.3/6); asymptotics n->6400.
 
-| Metric | Value |
-|---|---|
-| ratio (actual/mid) median | **1.14** |
-| ratio range | 0.84 – 1.42 |
-| In band [0.75, 1.30] | **41/45** |
-| Convergence by n | n=100→1.15, n=500→1.17 (stable) |
+Ground truth: recursive-bisection districting + multi-start NN/2-opt/Or-opt
+TSP (Held-Karp audit: mean gap 0.02%, max 0.75%), Euclidean, circuity=1.
 
-**Conclusion**: BHH formula `β·c·√(V·A)` achieves ±15% accuracy when its
-assumptions hold (uniform distribution, compact sub-regions, TSP-optimal
-ordering, n≥100). Fangshan's ratio 1.08–1.15 matches synthetic ground truth,
-confirming it satisfies the assumptions.
+### Harness incident ledger (honest, fixed BEFORE gates decided)
+1. v1-run1: repeats omitted (single-cover truth vs beta*sqrt(V*A) prediction,
+   V=1.2n) - semantic mismatch in harness, not model. Fixed (R1).
+2. v1-run2: repeats scattered to random global days -> non-compact day sets,
+   truth inflated +41.8% by cross-domain detours. Fixed (R2: boundary-strip
+   repeats, matches observed Fangshan structure: 41 repeat stores clustered
+   at shared borders).
 
-### Residual decomposition (ratio ~1.14)
+### Results (frozen gates)
+- **Part A original pure-BHH model: FAIL** - non-failing-shape coverage 58%
+  (gate >= 80%), median ratio 1.24. Plateau decomposition (n=800,K=21,f=1.2):
+  1.178 = finite-n BHH constant (1.106) x districting boundary term (1.086)
+  x repeat-detour (0.98). Ring/gauss5 behaved as pre-declared (A_eff/A_hull
+  0.36-0.45; underprediction direction after correction).
+- **Two-term fix mid = c*(beta*sqrt(V*A) + kappa*sqrt(K*A)), kappa=0.9531**
+  fitted ONLY on square+rect4x1 Part A:
 
-| Source | Contribution |
-|---|---|
-| NN+2opt vs exact TSP | ~5% |
-| Grid partition vs optimal | ~5% |
-| Hull area vs effective area | ~2% |
+| holdout set | n | median | coverage | orig model |
+|---|---|---|---|---|
+| disk+L-shape Part A | 30 | 0.999 | 100% | 60% |
+| asymptotics n->6400 | 16 | 1.003 | 100% | 62% |
+| K-invariance | 6 | 1.042 | 100% | 33% |
+| Part A all non-failing | 60 | 1.000 | 100% | 58% |
 
-### Failure modes (when assumptions violated)
+- Part B dense anchor (unchanged): 100% coverage, median 0.595 -> PASS.
+- Fangshan cross-check (real data, c=1.27, K=5): baseline-A ratio 1.147 ->
+  **0.962**, SP 1.080 -> **0.906**; 1834 km still STRONGLY_INCONSISTENT.
 
-| Violation | Observed ratio | Example |
-|---|---|---|
-| Clustered points (hull inflation) | 1.5–2.6 | Amazon daily TSP |
-| Strip partition (non-compact) | 3.0–3.7 | Synthetic v2 |
-| Full-domain sampling | 5.0–6.5 | Synthetic v1 |
-| Random ordering | +10–20% | vs TSP-optimal |
+### Verdict
+Framework v0.3.0-rc1. Sparse branch: synthetically validated at scale with
+fit/holdout discipline + one real cross-check; **fresh real-world holdout
+still missing** (Guangzhou burned as dev; Fangshan burned as calibration;
+Suzhou report lacks coordinates), hence rc not released. Dense anchor and
+hygiene gates unaffected.

@@ -2,7 +2,7 @@
 import math
 import random
 import unittest
-from spatial_ca.band import BETA, ENVELOPE_VERSION, ca_band, classify
+from spatial_ca.band import BETA, ENVELOPE_VERSION, KAPPA_BOUNDARY, ca_band, classify
 from spatial_ca.geometry import clean_coordinates
 
 
@@ -21,9 +21,12 @@ class TestBand(unittest.TestCase):
         self.assertAlmostEqual(BETA, 0.7124)
 
     def test_mid_formula_exact(self):
+        # v0.3.0 two-term model: interior BHH + boundary perimeter term
         b = ca_band(cr(), total_visits=242, available_workdays=21)
         A = b["geometry"]["hull_area_km2"]
-        expected = BETA * b["circuity"]["value"] * math.sqrt(242 * A)
+        expected = b["circuity"]["value"] * (
+            BETA * math.sqrt(242 * A)
+            + KAPPA_BOUNDARY * math.sqrt(21 * A))
         # A/mid 各自 round(2): 反推伪差 < 0.015 km 级
         self.assertAlmostEqual(b["reference_mid_km"], expected, delta=0.05)
 
@@ -38,17 +41,23 @@ class TestBand(unittest.TestCase):
         # 本测试同时是 C1.2 的可执行声明: 平移前后一切内部量相同,
         # 因此整批 CRS 错配在原理上不可能被内部几何发现。
 
-    def test_k_invariance_and_daily_direction(self):
+    def test_k_dependence_boundary_term(self):
+        # v0.3.0: monthly total is NOT K-invariant (synthetic v1 falsified
+        # the pure-BHH axiom: districting overhead scales as kappa*sqrt(K*A))
         b21 = ca_band(cr(), 242, 21)
         b23 = ca_band(cr(), 242, 23)
-        self.assertAlmostEqual(b21["reference_mid_km"],
-                               b23["reference_mid_km"], places=6)
+        self.assertGreater(b23["reference_mid_km"], b21["reference_mid_km"])
+        # K 增量必须精确等于边界项解析差 c·κ·√A·(√23-√21)
+        A = b21["geometry"]["hull_area_km2"]
+        c = b21["circuity"]["value"]
+        expected_delta = c * KAPPA_BOUNDARY * math.sqrt(A) * (
+            math.sqrt(23) - math.sqrt(21))
+        self.assertAlmostEqual(
+            b23["reference_mid_km"] - b21["reference_mid_km"],
+            expected_delta, delta=0.05)
         # 日里程 = T/K: K 越大, 日带越低 (V2 曾写反, 评审修正)
         self.assertGreater(b21["daily"]["band_km"][1],
                            b23["daily"]["band_km"][1])
-        self.assertAlmostEqual(b21["daily"]["mid_km"] * 21,
-                               b23["daily"]["mid_km"] * 23, delta=0.5)
-        # delta 吸收 daily round(2) x K 的合法伪差 (0.005*23 ~ 0.12)
 
     def test_policy_envelope_explicit(self):
         b = ca_band(cr(), 242, 21, city="天津市")

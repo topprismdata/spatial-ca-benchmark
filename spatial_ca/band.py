@@ -1,11 +1,21 @@
 """v2.1 CA estimator: regime-routed closed-form route-length model.
 
 Two literature-standard model forms, one frozen constant BETA = 0.7124
+# v0.3.0 boundary term (Daganzo partition-model lineage): recursive-bisection
+# districting adds a perimeter-like term kappa*sqrt(K*A) to the BHH interior.
+# kappa frozen from synthetic validation v1 (fit square+rect4x1 Part A,
+# 100% holdout coverage on disk+Lshape+asymptotics+K-invariance sets):
+# docs/superpowers/plans/2026-09-11-synthetic-validation-design.md
+KAPPA_BOUNDARY = 0.9531
 (BHH leading term; Applegate et al. 2006; analytic bounds [0.6277, 0.9038]
 are background, NOT band inputs):
 
 - sparse_partitioned (f = V/N <= 2.0, monthly-plan corridor regime):
-      monthly = BETA * c * sqrt(V * A)            [BHH / Daganzo]
+      monthly = c * (BETA * sqrt(V * A) + KAPPA_BOUNDARY * sqrt(K * A))
+      interior BHH term + districting-boundary perimeter term (v0.3.0,
+      frozen from pre-registered synthetic validation v1: kappa=0.9531,
+      fit on square+rect4x1, 100% holdout coverage on disk/L-shape/
+      asymptotic/K-invariance sets; Fangshan cross-check 0.906-0.962).
 - dense_revisit (f >= 3.0, weekly-contract regime): Steele/BvNW dilution
   evaluated on the UNIFORM normalized field (max smoothing scale) gives
       monthly = BETA * c * sqrt(V * A * K)
@@ -33,6 +43,12 @@ from spatial_ca.geometry import (CleanResult, CRS_UNCONFIRMED, Point,
 from spatial_ca.terrain import get_city_terrain_and_circuity
 
 BETA = 0.7124
+# v0.3.0 boundary term (Daganzo partition-model lineage): recursive-bisection
+# districting adds a perimeter-like term kappa*sqrt(K*A) to the BHH interior.
+# kappa frozen from synthetic validation v1 (fit square+rect4x1 Part A,
+# 100% holdout coverage on disk+Lshape+asymptotics+K-invariance sets):
+# docs/superpowers/plans/2026-09-11-synthetic-validation-design.md
+KAPPA_BOUNDARY = 0.9531
 BETA_BOUNDS = [0.6277, 0.9038]
 ENVELOPE_VERSION = "v1"
 # (lo, hi) multipliers on mid, by circuity provenance - policy, not stats
@@ -49,9 +65,9 @@ ENVELOPES = {
 DENSE_ENVELOPE = (0.25, 1.40)
 SPARSE_F, DENSE_F = 2.0, 3.0
 MODEL_FORM = {
-    "sparse_partitioned": "corridor_BHH_beta_sqrtVA",
+    "sparse_partitioned": "corridor_BHH_interior_plus_boundary",
     "dense_revisit": "dilution_uniform_field_upper_anchor",
-    "UNRELIABLE_TRANSITION": "corridor_BHH_beta_sqrtVA",
+    "UNRELIABLE_TRANSITION": "corridor_BHH_interior_plus_boundary",
 }
 MODEL_FORM_UNCERTAINTY = {"sparse_partitioned": 0.20,
                           "dense_revisit": 0.25,
@@ -111,10 +127,17 @@ def ca_band(clean: CleanResult, total_visits: int, available_workdays: int, *,
     else:
         regime = "UNRELIABLE_TRANSITION"
 
-    sparse_mid = BETA * circ["value"] * math.sqrt(max(0.0, total_visits * area))
-    # uniform-field dilution == BHH on the whole hull, swept K times per
-    # month: dense_mid = sqrt(K) * sparse_mid (Steele limit, max scale)
-    dense_mid = sparse_mid * math.sqrt(available_workdays)
+    # sparse/transition: BHH interior + boundary term (v0.3.0)
+    sparse_mid = circ["value"] * (
+        BETA * math.sqrt(max(0.0, total_visits * area))
+        + KAPPA_BOUNDARY * math.sqrt(max(0.0, available_workdays * area)))
+    boundary_km = circ["value"] * KAPPA_BOUNDARY * math.sqrt(
+        max(0.0, available_workdays * area))
+    # dense upper anchor: uniform-field Steele dilution, deliberately NOT
+    # coupled to the boundary term (synthetic Part B: 100% anchor coverage
+    # as-is; coupling would let it fall below compact-district truths)
+    dense_mid = BETA * circ["value"] * math.sqrt(
+        max(0.0, total_visits * area * available_workdays))
     mid = dense_mid if regime == "dense_revisit" else sparse_mid
     cell_rule = None
 
@@ -130,7 +153,7 @@ def ca_band(clean: CleanResult, total_visits: int, available_workdays: int, *,
         hi_mult += 0.05
 
     lo, hi = mid * lo_mult, mid * hi_mult
-    margin = (round(math.sqrt(available_workdays), 3)
+    margin = (round(dense_mid / sparse_mid, 3)
               if regime == "UNRELIABLE_TRANSITION" and sparse_mid > 0 else None)
     daily_visits = total_visits / available_workdays
 
@@ -147,6 +170,7 @@ def ca_band(clean: CleanResult, total_visits: int, available_workdays: int, *,
         "visits_per_store": round(f_revisit, 2),
         "transition_flag": regime == "UNRELIABLE_TRANSITION",
         "regime_margin": margin,
+        "boundary_term_km": round(boundary_km, 2) if regime != "dense_revisit" else None,
         "model_form": MODEL_FORM[regime],
         "model_form_uncertainty": MODEL_FORM_UNCERTAINTY[regime],
         "anchor": ("upper" if regime == "dense_revisit" else "central"),
