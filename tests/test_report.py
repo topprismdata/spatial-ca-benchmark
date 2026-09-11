@@ -84,20 +84,22 @@ class TestPreassess(unittest.TestCase):
                         measured_scope="with_stem_round_trip")
         self.assertIn("scope_caveat", rep.assessment)
 
-    def test_dense_regime_refused(self):
-        # Guangzhou-style: weekly revisits (f=V/N > 2.5) -> refusal, no band
+    def test_dense_regime_assessed_not_refused(self):
+        # v2.1 (spec §11): dilution model reaches the literature ceiling on
+        # dense lines -> assess with wide envelope, never REFUSED
         import random
         rnd = random.Random(42)
         pts = [(113.2 + rnd.random() * 0.07, 23.04 + rnd.random() * 0.05)
                for _ in range(160)]
         rep = preassess(pts, total_visits=160 * 4, available_workdays=23,
-                        source_crs="WGS84", city="广州市")   # no measured_km:
-        # refusal must be independent of it - the band itself is invalid
-        self.assertEqual(rep.gate, "REFUSED_PASSED")
-        self.assertIsNone(rep.band)
-        self.assertEqual(rep.assessment["status"],
-                         "NOT_ASSESSED_DENSE_VISIT_REGIME")
-        self.assertEqual(rep.assessment["visits_per_store"], 4.0)
+                        source_crs="WGS84", city="广州市")
+        self.assertEqual(rep.gate, "PASSED")
+        self.assertIsNotNone(rep.band)
+        self.assertEqual(rep.band["regime"], "dense_revisit")
+        self.assertEqual(rep.band["model_form"],
+                         "dilution_uniform_field_upper_anchor")
+        self.assertEqual(rep.band["anchor"], "upper")
+        self.assertEqual(rep.band["envelope_multipliers"], [0.25, 1.4])
 
     def test_sparse_regime_still_assessed(self):
         import random

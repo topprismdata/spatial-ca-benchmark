@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spatial-ca-benchmark"
-version = "0.1.0"
+version = "0.2.0"
 description = "Mapless asymptotic route-length benchmark and sanity checker for vehicle routing / field-sales visit scheduling, based on Daganzo continuous approximation and the BHH theorem."
 readme = "README.md"
 requires-python = ">=3.9"

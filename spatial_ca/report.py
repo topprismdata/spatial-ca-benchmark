@@ -1,9 +1,12 @@
-"""preassess(): the governance pipeline. State machine fixed by V2.1;
-this module adds no policy of its own.
+"""preassess(): the governance pipeline (spec v2.1 §3/§4).
 
 Gates: PASSED / PASSED_WITH_INVALID_ROWS_DROPPED /
 INCLUDING_CONFIRMED_OUTLIER / BLOCKED_BY_DATA_QUALITY /
 STRUCTURE_ONLY (C1.3: no absolute-km band on unconfirmed CRS).
+
+v2.1: dense-revisit regime is ASSESSED (dilution model, BvNW 1991; Guangzhou
+matrix 22.5% MAPE = literature road-network ceiling), never refused;
+degenerate geometry yields NOT_ASSESSED_DEGENERATE_GEOMETRY.
 """
 from __future__ import annotations
 
@@ -49,12 +52,20 @@ class PreAssessment:
         out.append(f"- K: available_workdays={self.k['available_workdays']} "
                    f"active_visit_days={self.k['active_visit_days']}")
         if self.band is not None:
-            lo, hi = self.band["reference_band_km"]
-            out.append(f"- CA reference band: **{self.band['reference_mid_km']}"
-                       f" km**, envelope [{lo}, {hi}] km "
-                       f"({self.band['band_method']}, not a statistical CI)")
+            b = self.band
+            lo, hi = b["reference_band_km"]
+            out.append(f"- estimate: **{b['daily_km']} km/day**, "
+                       f"{b['monthly_km']} km/month "
+                       f"(regime={b['regime']}, model={b['model_form']})")
+            out.append(f"- reference band: [{lo}, {hi}] km "
+                       f"({b['band_method']}, not a statistical CI; "
+                       f"model_form_uncertainty=±{b['model_form_uncertainty']:.0%})")
+            if b.get("regime_margin") is not None:
+                out.append(f"- regime_margin (dense/sparse): x{b['regime_margin']} "
+                           f"(UNRELIABLE_TRANSITION: regime boundary, both "
+                           f"forms reported, no smoothing)")
         else:
-            out.append(f"- band: none ({self.assessment['status']})")
+            out.append(f"- estimate: none ({self.assessment['status']})")
         out.append(f"- assessment: {self.assessment['status']}")
         if self.assessment.get("diagnostic_note"):
             out.append(f"  - {self.assessment['diagnostic_note']}")
@@ -79,8 +90,20 @@ def _rebuilt_clean(base: CleanResult, adj: Dict) -> CleanResult:
                        crs_status=base.crs_status)
 
 
+def _remap_weights(visit_weights: Sequence[float],
+                   kept_indices: Sequence[int]) -> List[float]:
+    """Map weights given in ORIGINAL row order onto cleaned points.
+
+    visit_weights[i] refers to original row i; invalid rows keep no slot, so
+    the estimator consumes weights in kept_indices order. Length must equal
+    the original input length (rows dropped by bbox still hold a weight).
+    """
+    return [float(visit_weights[i]) for i in kept_indices]
+
+
 def preassess(coords: Sequence[Point], *, total_visits: int,
               available_workdays: int, source_crs: str,
+              visit_weights: Optional[Sequence[float]] = None,
               city: Optional[str] = None,
               circuity_override: Optional[float] = None,
               is_closed_tour: bool = False,
@@ -90,6 +113,8 @@ def preassess(coords: Sequence[Point], *, total_visits: int,
               measured_scope: str = "inter_stop") -> PreAssessment:
     if measured_scope not in MEASURED_SCOPES:
         raise ValueError(f"measured_scope must be one of {MEASURED_SCOPES}")
+    if visit_weights is not None and len(visit_weights) != len(coords):
+        raise ValueError("visit_weights length must equal coords length")
     clean = clean_coordinates(coords, source_crs=source_crs)
     suspects = find_suspects(clean)
     adj = adjudicate(clean, suspects, confirm_drop=confirm_drop,
@@ -121,7 +146,7 @@ def preassess(coords: Sequence[Point], *, total_visits: int,
             structural=_structural(clean, suspects, frame_relative=True),
             assessment={"status": "NOT_ASSESSED_CRS_UNCONFIRMED",
                         "note": "declare source_crs (WGS84/GCJ02/BD09) to "
-                                "unlock the absolute-km reference band"})
+                                "unlock the absolute-km estimate"})
 
     effective = (_rebuilt_clean(clean, adj)
                  if (adj["dropped_by_user"] or adj["kept_confirmed_outlier"])
@@ -134,35 +159,26 @@ def preassess(coords: Sequence[Point], *, total_visits: int,
     else:
         gate = PASSED
 
+    w = (_remap_weights(visit_weights, list(clean.kept_indices))
+         if visit_weights is not None else None)
+    if w is not None and (adj["dropped_by_user"] or adj["kept_confirmed_outlier"]):
+        # re-filter rebuilt rows through the same index list
+        keep_orig = set(adj["original_indices"])
+        pairs = [(o, wt) for o, wt in zip(clean.kept_indices, w)
+                 if o in keep_orig]
+        w = [wt for _, wt in pairs]
+
     band = ca_band(effective, total_visits=total_visits,
-                   available_workdays=available_workdays, city=city,
+                   available_workdays=available_workdays,
+                   visit_weights=w, city=city,
                    circuity_override=circuity_override,
                    is_closed_tour=is_closed_tour,
                    including_confirmed_outlier=bool(kept))
 
-    # Dense-revisit refusal is INDEPENDENT of measured_km: the band itself
-    # is structurally wrong here (Guangzhou holdout: 0/10 in-band, f=4.2-4.6,
-    # underestimation ~2-3x), so it must never leak into the report at all.
-    if band["regime"] == "dense_revisit":
-        assessment = {"status": "NOT_ASSESSED_DENSE_VISIT_REGIME",
-                      "visits_per_store": band["visits_per_store"],
-                      "note": "stores revisited >2.5x per period: the month "
-                              "re-sweeps districts; single-hull CA would "
-                              "underestimate ~2-3x (Guangzhou holdout). "
-                              "Awaiting district decomposition (0.2)."}
-        return PreAssessment(gate="REFUSED_" + gate, lineage=lineage, k=k,
-                             band=None,
-                             structural=_structural(effective, suspects,
-                                                    frame_relative=False),
-                             assessment=assessment,
-                             meta={"band_method": None,
-                                   "envelope_version": None,
-                                   "crs_status": clean.crs_status,
-                                   "city": city,
-                                   "circuity": band["circuity"]})
-
     if measured_km is None:
-        assessment: Dict = {"status": "REFERENCE_ONLY"}
+        assessment: Dict = {"status": ("NOT_ASSESSED_DEGENERATE_GEOMETRY"
+                                       if band["degenerate_geometry"]
+                                       else "REFERENCE_ONLY")}
     elif band["degenerate_geometry"]:
         assessment = {"status": "NOT_ASSESSED_DEGENERATE_GEOMETRY",
                       "note": "collinear/insufficient points: no "
@@ -178,15 +194,15 @@ def preassess(coords: Sequence[Point], *, total_visits: int,
                       "note_level": "OPERATIONAL"}
         if measured_scope != "inter_stop":
             assessment["scope_caveat"] = (
-                "measured includes stems/round-trip; band models "
+                "measured includes stems/round-trip; model estimates "
                 "inter-stop distance only - compare with care")
     return PreAssessment(gate=gate, lineage=lineage, k=k, band=band,
                          structural=_structural(effective, suspects,
                                                 frame_relative=False),
                          assessment=assessment,
-                         meta={"band_method": (band or {}).get("band_method"),
-                               "envelope_version": (band or {})
-                               .get("envelope_version"),
+                         meta={"model_form": band["model_form"],
+                               "band_method": band["band_method"],
+                               "envelope_version": band["envelope_version"],
                                "crs_status": clean.crs_status,
                                "city": city,
-                               "circuity": (band or {}).get("circuity")})
+                               "circuity": band["circuity"]})
