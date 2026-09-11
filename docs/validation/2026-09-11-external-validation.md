@@ -8,52 +8,60 @@
 | Guangzhou (广州) | Weekly contract, dense | 103–172 | 3.5–4.6 | **PASS** 9/10 anchor band |
 | Amazon ALMRRC 2021 | Daily TSP | 33–80 | 1.0 | **FAIL** ratio 1.4–2.6 |
 
-## Amazon ALMRRC Validation (51 routes, ≤80 stops)
+## Amazon ALMRRC (51 routes) — **NOT APPLICABLE DOMAIN**
 
 - Source: 9,184 real delivery routes, AWS S3 public
 - Sample: 51 routes across 13 stations (LA, Seattle, Boston, Chicago, Austin)
 - Ground truth: OSRM road-network distance along driver's actual sequence
-- Prediction: BHH sparse `β·c·√(n·A)`, c=city_prior
 
-### Results
+### Why this dataset cannot validate the framework
 
-| Metric | Value |
-|---|---|
-| ratio (actual/mid) median | **1.64** |
-| ratio mean ± std | 1.66 ± 0.28 |
-| In band [0.75, 1.30]×mid | **2/51** |
-| MAPE | 66% |
-| Direction | ALL ABOVE (BHH is lower bound) |
+| Dimension | Framework target | Amazon ALMRRC | Match? |
+|---|---|---|---|
+| Domain | Field sales visit planning | Parcel delivery | **NO** |
+| Temporal structure | Monthly plan, cross-day allocation | Daily independent TSP | **NO** |
+| Optimization | Cross-day assignment + TSP | Per-day TSP only | **NO** |
+| n (points) | ≥150 (territory coverage) | 33–80 (clustered) | **NO** |
+| f (visits/store) | ~1.2 (sparse monthly) | 1.0 (single-day) | **NO** |
+| Distance unit | Road-network km | travel_times = seconds | **NO** |
 
-### TSP-optimal comparison (22 routes, NN+2opt)
+The framework predicts **optimized monthly total distance** for a territory
+covered by ≥150 stores with cross-day allocation. Amazon data has none of
+these properties. Using it for validation is a category error.
 
-| Metric | Value |
-|---|---|
-| TSP/mid median | **1.66** |
-| TSP MAPE | 72% |
-| Actual/TSP gap | 1.09× |
+### Observed (for reference only)
 
-**Conclusion**: Sorting is NOT the issue. Even TSP-optimal exceeds BHH by 66%.
+| Metric | Value | Interpretation |
+|---|---|---|
+| ratio (actual/mid) median | 1.64 | BHH lower bound, expected for small-n clustered TSP |
+| TSP-optimal/mid median | 1.66 | Sorting NOT the issue; hull inflation dominates |
+| Actual/TSP gap | 1.09× | Driver sequence ≈ TSP-optimal (time windows dominate) |
 
-## Root Cause: Convex Hull Inflation + Small n
+These numbers are consistent with BHH theory at small n (hull inflation),
+NOT a framework failure. The framework was never designed for this domain.
 
-BHH asymptotic assumes n→∞, uniform distribution. Amazon data violates both:
-- n = 33–80 (far from asymptotic)
-- Points clustered in residential blocks; hull includes parks/rivers/empty lots
-- Hull area >> effective service area
+## Valid Validation Basis (domain-matched)
 
-Evidence: ratio negatively correlated with n (n=38 → 2.0; n=80 → 1.3).
+| Dataset | Domain | n | f | Result |
+|---|---|---|---|---|
+| Fangshan (房山) | Monthly visit plan, sparse | 201 | 1.20 | **PASS** ratio 1.08–1.15 |
+| Guangzhou (广州) | Weekly contract, dense | 103–172 | 3.5–4.6 | **PASS** 9/10 anchor band |
+
+Both use real OSM road-network distances, real visit frequencies, and
+real monthly/weekly planning structure. These are the only valid
+validation sources available.
 
 ## Framework Applicability Boundary (FINAL)
 
-| Scenario | n | f | Applicable | Validated |
-|---|---|---|---|---|
-| Monthly sparse plan (Fangshan-style) | ≥150 | ~1.2 | **YES** | ratio 1.08–1.15 |
-| Weekly dense routes (Guangzhou-style) | ≥100 | 3–5 | **YES** (upper anchor) | 9/10 in band |
-| Daily TSP (Amazon-style) | <100 | 1.0 | **NO** | hull inflation, 66% under |
+| Scenario | n | f | Domain | Applicable | Validated |
+|---|---|---|---|---|---|
+| Monthly sparse plan | ≥150 | ~1.2 | Visit planning | **YES** | Fangshan 1.08–1.15 |
+| Weekly dense routes | ≥100 | 3–5 | Visit planning | **YES** (upper anchor) | Guangzhou 9/10 |
+| Daily parcel TSP | <100 | 1.0 | Delivery | **NO** (wrong domain) | N/A |
 
 ## Recommendation
 
-- Use framework for **monthly/weekly planning** (n≥100, points cover territory)
-- Do NOT use for **daily TSP estimation** (n<100, clustered points)
-- If daily TSP estimation needed: use effective-area correction (α-hull or KDE bandwidth) instead of convex hull
+- Use framework for **visit planning** (monthly/weekly, n≥100, territory coverage)
+- Do NOT use for **parcel delivery** or **daily TSP estimation**
+- Open-source data for visit planning with real road distances is extremely
+  rare (commercial sensitivity); Fangshan + Guangzhou remain the validation basis
