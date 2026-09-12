@@ -73,6 +73,12 @@ MODEL_FORM_UNCERTAINTY = {"sparse_partitioned": 0.20,
                           "dense_revisit": 0.25,
                           "UNRELIABLE_TRANSITION": 0.35}
 THIN_DAILY_VISITS = 4.0
+# v0.3.0 input-side applicability flag (Beijing fresh-holdout, spec §5.6):
+# stores whose NN scale sqrt(A_hull/n) < HOP_DENSE_LAMBDA_KM sit in ultra-dense
+# urban territory where convex-hull uniformity and c~1.2-1.3 prioms break down
+# (measured c_hop 1.9-3.1, coverage 4/10); regional lines (lambda >= 0.6 km)
+# validated 7/8 with median ratio 1.010.
+HOP_DENSE_LAMBDA_KM = 0.6
 MIN_CELL_KM = 0.05
 _LO_SLACK, _HI_SLACK = 0.90, 1.50    # status thresholds, version v1
 
@@ -119,6 +125,7 @@ def ca_band(clean: CleanResult, total_visits: int, available_workdays: int, *,
         if sum(weights) <= 0:
             raise ValueError("visit_weights sum must be positive")
 
+    hop_lambda = math.sqrt(area / max(1, n))
     f_revisit = total_visits / max(1, n)
     if f_revisit <= SPARSE_F:
         regime = "sparse_partitioned"
@@ -190,11 +197,16 @@ def ca_band(clean: CleanResult, total_visits: int, available_workdays: int, *,
         "crs_status": clean.crs_status,
         "degenerate_geometry": area <= 0.0 or area < 1e-4 * max(1e-9, dx * dy),
         "small_sample_warning": daily_visits < THIN_DAILY_VISITS,
+        "hop_lambda_km": round(hop_lambda, 3),
+        "ultra_dense_urban_warning": hop_lambda < HOP_DENSE_LAMBDA_KM,
         "including_confirmed_outlier": including_confirmed_outlier,
         "is_closed_tour": is_closed_tour,
         "assumptions": [f"regime:{regime}"]
         + (["ASSUMED_UNIFORM_VISIT_DENSITY"] if uniform_assumed else [])
-        + ["inter_stop_distance_only", "K_from:available_workdays"],
+        + ["inter_stop_distance_only", "K_from:available_workdays"]
+        + (["ULTRA_DENSE_URBAN territory: treat as lower bound only; "
+            "c_hop measured 1.9-3.1 on Beijing holdout, prior c understates"]
+           if hop_lambda < HOP_DENSE_LAMBDA_KM else []),
     }
 
 

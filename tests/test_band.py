@@ -59,6 +59,25 @@ class TestBand(unittest.TestCase):
         self.assertGreater(b21["daily"]["band_km"][1],
                            b23["daily"]["band_km"][1])
 
+    def test_ultra_dense_urban_flag(self):
+        # Beijing holdout lesson: small NN-scale territory flagged as
+        # lower-bound-only (input-side, no truth involved)
+        import random as _r
+        rnd = _r.Random(7)
+        dense = clean_coordinates([(116.40 + rnd.random()*0.02,
+                                    39.90 + rnd.random()*0.02)
+                                   for _ in range(220)], source_crs="WGS84")
+        sparse = clean_coordinates([(116.0 + rnd.random()*0.35,
+                                      39.6 + rnd.random()*0.3)
+                                     for _ in range(220)], source_crs="WGS84")
+        bd = ca_band(dense, 260, 21)
+        bs = ca_band(sparse, 260, 21)
+        self.assertTrue(bd["ultra_dense_urban_warning"])
+        self.assertFalse(bs["ultra_dense_urban_warning"])
+        self.assertIn("ULTRA_DENSE_URBAN", " ".join(bd["assumptions"]))
+        # warning is purely geometric: regime unchanged
+        self.assertEqual(bs["regime"], "sparse_partitioned")
+
     def test_policy_envelope_explicit(self):
         b = ca_band(cr(), 242, 21, city="天津市")
         self.assertEqual(b["band_method"],

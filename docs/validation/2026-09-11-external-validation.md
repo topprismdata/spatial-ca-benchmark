@@ -110,3 +110,35 @@ fit/holdout discipline + one real cross-check; **fresh real-world holdout
 still missing** (Guangzhou burned as dev; Fangshan burned as calibration;
 Suzhou report lacks coordinates), hence rc not released. Dense anchor and
 hygiene gates unaffected.
+
+
+## Beijing Fresh Real-World Holdout (2026-09-12, v0.3.0 gate)
+
+Source: 全部.xlsx (SRP monthly plan, GCJ02 verified against Fangshan 0m);
+18 lines after excluding burned Fangshan line NP9902504. Measured = OSRM
+road distance along actual visit sequence summed over 21 visit days
+(inter-stop, no depot). Scripts: experiments/beijing_holdout.py,
+beijing_cpair.py, beijing_chop.py; raw: output/beijing_holdout_v1.json,
+output/beijing_cpair.json.
+
+| model | median ratio | coverage [0.75,1.30] |
+|---|---|---|
+| pure BHH (beta*sqrt(VA)) | 1.649 | 3/18 |
+| two-term (+kappa*sqrt(KA), c=1.22 prior) | **1.202** | **11/18** |
+| two-term + measured c_pair (0.3-3km) | — | 9/18 |
+| two-term + measured c_hop (adaptive window) | — | 7/18 |
+
+Slice by input-side NN-scale lambda=sqrt(A_hull/n):
+- regional (lambda>=0.6km, n=8): median **1.010**, coverage **7/8** -> gate met
+- ultra-dense urban (lambda<0.6km, n=10): median 1.700, coverage 4/10 -> domain violation:
+  convex-hull uniformity fails (A_eff/A_hull pattern of ring/gauss5) AND
+  prior c understates measured c_hop 1.9-3.1 (short-hop street-grid detour).
+
+No global c re-calibration: measured-c variants rescue urban lines but break
+regional ones (c_hop regional slice 1/8). Correct handling = keep frozen
+prior + input-side `ultra_dense_urban_warning` flag (band output), wording
+downgraded to lower-bound in that regime.
+
+**Verdict: v0.3.0 promoted from rc** — boundary term confirmed on fresh
+real data (direction + magnitude), sparse regional-domain gate passed,
+failure mode characterized, flagged, and excluded from claim scope.
