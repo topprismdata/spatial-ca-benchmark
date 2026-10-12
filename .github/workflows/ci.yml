@@ -16,6 +16,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install package (includes coords-core git dep)
+        run: pip install -e ".[dev]"
       - name: Run unit tests
-        # stdlib only: no install step needed
+        # WP03: 依赖 coords-core (git 直接引用), 由上一步安装
         run: python -m unittest discover -s tests
