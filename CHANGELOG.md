@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.1 - 2026-10-12
+### Fixed
+- cli: pyproject declared `[project.scripts] spatial-ca = "spatial_ca.cli:main"`
+  but no cli.py shipped - entry point was broken. Thin stdlib-only CLI added
+  (`preassess` subcommand over report.preassess(), markdown/JSON output,
+  CSV/JSON coordinate input, confirm_drop/confirm_keep passthrough).
+### Changed
+- `__version__` bumped to 0.3.1 to match.
+
 ## v0.1.0 - 2026-09-11
 First public release. Scope per docs/MEASUREMENT_CONTRACT.md; the Guangzhou
 holdout (docs/superpowers/research/) shaped the regime guard below.
