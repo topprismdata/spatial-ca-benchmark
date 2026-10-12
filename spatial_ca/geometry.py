@@ -50,67 +50,15 @@ def _kx(mean_lat_deg: float) -> float:
 # ---------------------------------------------------------------------------
 # datum transforms (public closed-form algorithms; Krasovsky 1940 params)
 # ---------------------------------------------------------------------------
-_A = 6378245.0
-_EE = 0.00669342162296594323
-_XPI = math.pi * 3000.0 / 180.0
-
-
-def _out_of_china(lng: float, lat: float) -> bool:
-    return not (CN_BBOX[0] <= lng <= CN_BBOX[2]
-                and CN_BBOX[1] <= lat <= CN_BBOX[3])
-
-
-def _transform_lat(lng: float, lat: float) -> float:
-    ret = (-100.0 + 2.0 * lng + 3.0 * lat + 0.2 * lat * lat
-           + 0.1 * lng * lat + 0.2 * math.sqrt(abs(lng)))
-    ret += (20.0 * math.sin(6.0 * lng * math.pi)
-            + 20.0 * math.sin(2.0 * lng * math.pi)) * 2.0 / 3.0
-    ret += (20.0 * math.sin(lat * math.pi)
-            + 40.0 * math.sin(lat / 3.0 * math.pi)) * 2.0 / 3.0
-    ret += (160.0 * math.sin(lat / 12.0 * math.pi)
-            + 320.0 * math.sin(lat * math.pi / 30.0)) * 2.0 / 3.0
-    return ret
-
-
-def _transform_lng(lng: float, lat: float) -> float:
-    ret = (300.0 + lng + 2.0 * lat + 0.1 * lng * lng
-           + 0.1 * lng * lat + 0.1 * math.sqrt(abs(lng)))
-    ret += (20.0 * math.sin(6.0 * lng * math.pi)
-            + 20.0 * math.sin(2.0 * lng * math.pi)) * 2.0 / 3.0
-    ret += (20.0 * math.sin(lng * math.pi)
-            + 40.0 * math.sin(lng / 3.0 * math.pi)) * 2.0 / 3.0
-    ret += (150.0 * math.sin(lng / 12.0 * math.pi)
-            + 300.0 * math.sin(lng / 30.0 * math.pi)) * 2.0 / 3.0
-    return ret
-
-
-def gcj02_to_wgs84(lng: float, lat: float) -> Point:
-    """Closed-form one-step de-bias. Points outside China pass through."""
-    if _out_of_china(lng, lat):
-        return lng, lat
-    d_lat = _transform_lat(lng - 105.0, lat - 35.0)
-    d_lng = _transform_lng(lng - 105.0, lat - 35.0)
-    rad_lat = lat / 180.0 * math.pi
-    magic = math.sin(rad_lat)
-    magic = 1 - _EE * magic * magic
-    sqrt_magic = math.sqrt(magic)
-    d_lat = (d_lat * 180.0) / ((_A * (1 - _EE)) / (magic * sqrt_magic) * math.pi)
-    d_lng = (d_lng * 180.0) / (_A / sqrt_magic * math.cos(rad_lat) * math.pi)
-    return lng - d_lng, lat - d_lat
-
-
-def bd09_to_gcj02(lng: float, lat: float) -> Point:
-    x = abs(lng - 0.0065)
-    y = abs(lat - 0.006)
-    z = math.sqrt(x * x + y * y) - 0.00002 * math.sin(y * _XPI)
-    theta = math.atan2(y, x) - 0.000003 * math.cos(x * _XPI)
-    return z * math.cos(theta), z * math.sin(theta)
-
-
-def bd09_to_wgs84(lng: float, lat: float) -> Point:
-    gl, ga = bd09_to_gcj02(lng, lat)
-    return gcj02_to_wgs84(gl, ga)
-
+# WP03: 转换函数收敛到 coords-core v0.1.0 (唯一事实源)。
+# 行为兼容说明: 本仓公开 API gcj02_to_wgs84 历史上是闭式一步 de-bias,
+# 因此转发到 coords_core 的 closed_form 层 (位级一致), 迭代规范层见 coords_core。
+from coords_core import (  # noqa: E402
+    bd09_to_gcj02,
+    bd09_to_wgs84,
+    gcj02_to_wgs84_closed_form as gcj02_to_wgs84,
+    out_of_china as _out_of_china,
+)
 
 # ---------------------------------------------------------------------------
 # index-preserving cleaning
